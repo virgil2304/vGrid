@@ -1,4 +1,4 @@
-/* vGrid v1.0.0.5.29 | Last updated: 2026-09-09 */
+/* vGrid v1.0.0.5.30 | Last updated: 2026-09-15 */
 function vGrid(config) {
 
     const { el, caption, columns = [], data = [], dataSource, method = 'GET',
@@ -44,6 +44,21 @@ function vGrid(config) {
         return null;
     }
     const rowKeyColumn = rowKeyColumns[0];
+
+    const settingsStorageKey = `vgrid:${typeof el === 'string' ? el : (el?.id || '')}:${dataSource || ''}:columns`;
+    if (settings && columns.length) {
+        try {
+            const saved = JSON.parse(localStorage.getItem(settingsStorageKey));
+            if (saved && typeof saved === 'object') {
+                columns.forEach(column => {
+                    if (typeof saved[column.name] === 'boolean') column.active = saved[column.name];
+                });
+                if (!columns.some(column => column.active !== false)) {
+                    columns.forEach(column => { column.active = true; });
+                }
+            }
+        } catch { }
+    }
 
     let activeColumns = columns.filter(column => column.active !== false);
     if (columns.length && !activeColumns.length) {
@@ -190,6 +205,7 @@ function vGrid(config) {
         const legend = document.createElement('legend');
         legend.textContent = 'Display columns';
         fieldset.appendChild(legend);
+        const settingsCheckboxes = [];
         columns.forEach(col => {
             const row = document.createElement('label');
             row.style.display = 'block';
@@ -197,17 +213,47 @@ function vGrid(config) {
             checkbox.type = 'checkbox';
             checkbox.checked = col.active !== false;
             checkbox.addEventListener('change', () => {
-                if (!checkbox.checked && columns.filter(c => c.active !== false).length === 1) {
+                if (!checkbox.checked && !settingsCheckboxes.some(entry => entry.checkbox.checked)) {
                     checkbox.checked = true;
-                    return;
                 }
-                col.active = checkbox.checked;
-                rebuildColumns();
             }, { signal });
+            settingsCheckboxes.push({ column: col, checkbox });
             row.append(checkbox, document.createTextNode(` ${col.label || col.name}`));
             fieldset.appendChild(row);
         });
         settingsPanel.appendChild(fieldset);
+
+        const applyPending = () => {
+            settingsCheckboxes.forEach(({ column, checkbox }) => { column.active = checkbox.checked; });
+            settingsPanel.hidePopover();
+            rebuildColumns();
+        };
+
+        const applyButton = document.createElement('button');
+        applyButton.type = 'button';
+        applyButton.textContent = 'Apply';
+        applyButton.addEventListener('click', applyPending, { signal });
+
+        const saveButton = document.createElement('button');
+        saveButton.type = 'button';
+        saveButton.textContent = 'Save';
+        saveButton.addEventListener('click', () => {
+            applyPending();
+            const preference = {};
+            settingsCheckboxes.forEach(({ column, checkbox }) => { preference[column.name] = checkbox.checked; });
+            try { localStorage.setItem(settingsStorageKey, JSON.stringify(preference)); } catch { }
+        }, { signal });
+
+        const settingsActions = document.createElement('div');
+        settingsActions.style.marginTop = '0.5em';
+        settingsActions.append(applyButton, document.createTextNode(' '), saveButton);
+        settingsPanel.appendChild(settingsActions);
+
+        settingsPanel.addEventListener('toggle', event => {
+            if (event.newState === 'open') {
+                settingsCheckboxes.forEach(({ column, checkbox }) => { checkbox.checked = column.active !== false; });
+            }
+        }, { signal });
     }
 
     const inlineSettings = settingsButton && !externalSettingsElement;
