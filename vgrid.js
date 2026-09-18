@@ -1,4 +1,4 @@
-/* vGrid v1.0.0.5.38 | Last updated: 2026-09-17 */
+/* vGrid v1.0.0.5.39 | Last updated: 2026-09-17 */
 function vGrid(config) {
 
     const { el, caption, columns = [], data = [], dataSource, method = 'GET', headers = {},
@@ -598,6 +598,7 @@ function vGrid(config) {
 
     const SUBGRID_CLOSED = '\u25B8\uFE0E';
     const SUBGRID_OPEN = '\u25BE\uFE0E';
+    const SUBGRID_EASE_MS = 220;
 
     const panelValue = (panel, row) => {
         const value = row?.[panel.id];
@@ -666,6 +667,12 @@ function vGrid(config) {
         entry.instance?.destroy();
         entry.instance = null;
         const token = entry.token = (entry.token || 0) + 1;
+        entry.ready = false;
+        const ready = () => {
+            if (entry.token !== token) return;
+            entry.ready = true;
+            syncPanelHeight(entry);
+        };
         const caption = panelCaption(panel);
         const content = document.createElement('div');
         if (caption) {
@@ -679,11 +686,15 @@ function vGrid(config) {
         const value = panelValue(panel, row);
         if (value === '') {
             content.textContent = `No "${panel.id}" value on this row.`;
+            ready();
             return;
         }
         if (panel.type === 'grid') {
             const host = document.createElement('div');
-            content.replaceChildren(host);
+            const loading = document.createElement('div');
+            loading.textContent = 'Loading…';
+            host.hidden = true;
+            content.replaceChildren(loading, host);
             entry.instance = vGrid({
                 el: host,
                 columns: panel.columns || [],
@@ -693,6 +704,12 @@ function vGrid(config) {
                 rowsPerPage: panel.rowsPerPage || 10,
                 externalFilters: panel.externalFilters || {},
                 settings: false,
+                onPage: () => {
+                    if (entry.token !== token) return;
+                    loading.remove();
+                    host.hidden = false;
+                    ready();
+                },
             });
             return;
         }
@@ -704,17 +721,19 @@ function vGrid(config) {
                 if (!content.isConnected || entry.token !== token) return;
                 if (panel.type === 'html') {
                     content.innerHTML = text;
-                    return;
+                } else {
+                    const pre = document.createElement('pre');
+                    pre.style.margin = '0';
+                    pre.style.whiteSpace = 'pre-wrap';
+                    pre.textContent = text;
+                    content.replaceChildren(pre);
                 }
-                const pre = document.createElement('pre');
-                pre.style.margin = '0';
-                pre.style.whiteSpace = 'pre-wrap';
-                pre.textContent = text;
-                content.replaceChildren(pre);
+                ready();
             })
             .catch(error => {
                 if (error.name === 'AbortError' || !content.isConnected || entry.token !== token) return;
                 content.textContent = 'Failed to load.';
+                ready();
             });
     };
 
@@ -728,13 +747,50 @@ function vGrid(config) {
         return rows;
     };
 
+    const syncPanelHeight = entry => {
+        if (!entry.ready || entry.state !== 'open' || !entry.panelRow.isConnected) return;
+        entry.slide.style.height = `${entry.clip.offsetHeight}px`;
+    };
+
+    const releasePanel = entry => {
+        entry.observer?.disconnect();
+        entry.observer = null;
+        entry.instance?.destroy();
+        entry.instance = null;
+        entry.panelRow.remove();
+    };
+
     const closePanel = (sub, tr) => {
         const entry = sub.entries.get(tr);
         if (!entry) return;
-        entry.instance?.destroy();
-        entry.panelRow.remove();
         sub.entries.delete(tr);
         setToggleState(sub, entry.toggle, false);
+        entry.state = 'closing';
+        entry.observer?.disconnect();
+        entry.observer = null;
+        entry.token = (entry.token || 0) + 1;
+        const current = entry.slide.offsetHeight;
+        if (!entry.panelRow.isConnected || !current) {
+            releasePanel(entry);
+            return;
+        }
+        let settled = false;
+        let timer = null;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            entry.slide.removeEventListener('transitionend', onEnd);
+            releasePanel(entry);
+        };
+        const onEnd = event => {
+            if (event.target === entry.slide && event.propertyName === 'height') finish();
+        };
+        entry.slide.addEventListener('transitionend', onEnd, { signal });
+        timer = setTimeout(finish, SUBGRID_EASE_MS + 150);
+        entry.slide.style.height = `${current}px`;
+        void entry.slide.offsetHeight;
+        entry.slide.style.height = '0px';
     };
 
     const showPanelContent = (sub, entry, panel, row) => {
@@ -748,9 +804,14 @@ function vGrid(config) {
         panelRow.dataset.vgridSubgrid = '1';
         const cell = document.createElement('td');
         cell.colSpan = totalCols;
-        cell.style.padding = '0.5em';
-        cell.style.position = 'relative';
+        cell.className = 'vgrid-subgrid-cell';
+        const slide = document.createElement('div');
+        slide.className = 'vgrid-subgrid-slide';
+        slide.style.cssText = `height:0;overflow:hidden;transition:height ${SUBGRID_EASE_MS}ms ease;`;
+        const clip = document.createElement('div');
+        clip.className = 'vgrid-subgrid-clip';
         const body = document.createElement('div');
+        body.className = 'vgrid-subgrid-body';
         const close = document.createElement('button');
         close.type = 'button';
         close.className = 'vgrid-subgrid-close';
@@ -758,15 +819,23 @@ function vGrid(config) {
         close.title = 'Close';
         close.setAttribute('aria-label', 'Close');
         close.addEventListener('click', () => closePanel(sub, tr), { signal });
-        const entry = { panelRow, toggle, body, instance: null, panel: null };
+        const entry = { panelRow, toggle, body, slide, clip, state: 'opening', ready: false, observer: null, instance: null, panel: null };
         sub.entries.set(tr, entry);
-        cell.appendChild(close);
-        cell.appendChild(body);
+        clip.appendChild(close);
+        clip.appendChild(body);
+        slide.appendChild(clip);
+        cell.appendChild(slide);
         panelRow.appendChild(cell);
         addBorders(panelRow);
         const attached = panelRowsOf(tr);
         (attached[attached.length - 1] || tr).after(panelRow);
+        slide.style.height = '0px';
         showPanelContent(sub, entry, panel, row);
+        entry.observer = new ResizeObserver(() => syncPanelHeight(entry));
+        entry.observer.observe(clip);
+        void slide.offsetHeight;
+        entry.state = 'open';
+        slide.style.height = `${clip.offsetHeight}px`;
     };
 
     const selectPanel = (sub, tr, row, toggle, panel) => {
@@ -864,7 +933,11 @@ function vGrid(config) {
     const clearSubgrids = () => {
         hidePanelMenus();
         subgrids.forEach(sub => {
-            sub.entries.forEach(entry => entry.instance?.destroy());
+            sub.entries.forEach(entry => {
+                entry.observer?.disconnect();
+                entry.observer = null;
+                entry.instance?.destroy();
+            });
             sub.entries.clear();
         });
     };
