@@ -6,14 +6,15 @@ function vGrid(config) {
         filterRow = true, sortBy, rowsPerPage: rowsPerPageConfig, rowsPerPageOptions: rowsPerPageOptionsConfig, showPaginationControls = true,
         showPagination = showPaginationControls, showRowsPerPage = showPaginationControls,
         externalFilters = {}, externalRowsPerPage, externalPagination, externalSort = {}, externalSummary = {},
-        settings = true, externalSettings, subgrid,
-        onSort, onFilter, onPage } = config;
+        settings = true, externalSettings, subgrid, borders = 'horizontal', size = 'medium', actions = 'caption', easing = 160,
+        onSort, onFilter, onPage, onReady, namespace } = config;
 
     const toPageSize = value => {
         const size = parseInt(value);
         return Number.isFinite(size) && size > 0 ? size : null;
     };
-    const rowsPerPage = toPageSize(rowsPerPageConfig) ?? undefined;
+    const rowsPerPageDefault = showPagination || showRowsPerPage || externalPagination || externalRowsPerPage ? 10 : 0;
+    const rowsPerPage = toPageSize(rowsPerPageConfig === undefined ? rowsPerPageDefault : rowsPerPageConfig) ?? undefined;
     const normalisedPageSizes = Array.isArray(rowsPerPageOptionsConfig)
         ? [...new Set(rowsPerPageOptionsConfig.map(toPageSize).filter(size => size !== null))]
         : null;
@@ -24,6 +25,30 @@ function vGrid(config) {
     if (rowsPerPageOptions && !rowsPerPage) {
         console.error('vGrid: rowsPerPageOptions has no effect without a positive rowsPerPage.');
     }
+
+    const borderPresets = ['all', 'horizontal', 'rows', 'inner', 'none'];
+    if (!borderPresets.includes(borders)) {
+        console.error(`vGrid: borders must be one of ${borderPresets.join(', ')}.`);
+    }
+    const borderPreset = borderPresets.includes(borders) ? borders : 'horizontal';
+
+    const sizePresets = ['smallest', 'small', 'medium', 'large', 'larger', 'largest'];
+    if (!sizePresets.includes(size)) {
+        console.error(`vGrid: size must be one of ${sizePresets.join(', ')}.`);
+    }
+    const sizePreset = sizePresets.includes(size) ? size : 'medium';
+
+    const actionsPresets = ['caption', 'bottom', 'none'];
+    if (!actionsPresets.includes(actions)) {
+        console.error(`vGrid: actions must be one of ${actionsPresets.join(', ')}.`);
+    }
+    const actionsPreset = actionsPresets.includes(actions) ? actions : 'caption';
+
+    const easingValue = Number(easing);
+    if (!Number.isFinite(easingValue) || easingValue < 0) {
+        console.error('vGrid: easing must be a duration in milliseconds, 0 for none.');
+    }
+    const easingMs = Number.isFinite(easingValue) && easingValue >= 0 ? easingValue : 160;
 
     const reservedColumnNames = new Set([
         'page', 'limit', 'sort', 'dir', 'offset', 'cursor',
@@ -133,6 +158,9 @@ function vGrid(config) {
         return null;
     }
 
+    const namePrefix = typeof namespace === 'string' && namespace ? namespace : (target.id || '');
+    const partClass = (part, ...extra) => ['vgrid-' + part, namePrefix ? `${namePrefix}-${part}` : '', ...extra].filter(Boolean).join(' ');
+
     const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
     const sameOriginUrl = url => {
         try { return new URL(url, location.href).origin === location.origin; }
@@ -218,6 +246,7 @@ function vGrid(config) {
     const element = target.tagName === 'TABLE' ? target : document.createElement('table');
     const createdTable = element !== target;
     if (createdTable) target.replaceChildren(element);
+    element.classList.add('vgrid');
     element.border = '1';
     element.rules = 'all';
     element.style.width = '100%';
@@ -268,10 +297,15 @@ function vGrid(config) {
     const colgroup = document.createElement('colgroup');
     const columnCols = [];
     const colSpanCells = [];
+    const isToggleCell = index => toggleIndexesSorted.includes(index);
     const buildColgroup = () => {
         columnCols.length = 0;
-        colgroup.replaceChildren(...Array.from({ length: totalCols }, () => {
+        colgroup.replaceChildren(...Array.from({ length: totalCols }, (unused, index) => {
             const col = document.createElement('col');
+            if (isToggleCell(index)) {
+                col.className = partClass('toggle-column');
+                col.style.width = '1px';
+            }
             columnCols.push(col);
             return col;
         }));
@@ -283,11 +317,6 @@ function vGrid(config) {
         cell.style.textOverflow = 'ellipsis';
         cell.style.whiteSpace = 'nowrap';
         return cell;
-    };
-    const addBorders = tr => {
-        tr.style.border = '1px solid';
-        Array.from(tr.cells).forEach(cell => { cell.style.border = '1px solid'; });
-        return tr;
     };
 
     const controller = new AbortController();
@@ -313,12 +342,23 @@ function vGrid(config) {
 
         vGrid.instanceCount = (vGrid.instanceCount || 0) + 1;
         settingsPanel.id = `vgrid-settings-${vGrid.instanceCount}`;
+        settingsPanel.className = partClass('settings');
         settingsPanel.setAttribute('popover', '');
         settingsButton = document.createElement('button');
         settingsButton.type = 'button';
         settingsButton.title = 'Settings';
         settingsButton.textContent = '\u2699\uFE0E';
         settingsButton.setAttribute('popovertarget', settingsPanel.id);
+
+        const settingsClose = document.createElement('button');
+        settingsClose.type = 'button';
+        settingsClose.className = partClass('settings-close');
+        settingsClose.textContent = '\u00D7';
+        settingsClose.title = 'Close';
+        settingsClose.setAttribute('aria-label', 'Close');
+        settingsClose.setAttribute('popovertarget', settingsPanel.id);
+        settingsClose.setAttribute('popovertargetaction', 'hide');
+        settingsPanel.appendChild(settingsClose);
 
         const fieldset = document.createElement('fieldset');
         const legend = document.createElement('legend');
@@ -364,33 +404,56 @@ function vGrid(config) {
         }, { signal });
 
         const settingsActions = document.createElement('div');
-        settingsActions.style.marginTop = '0.5em';
-        settingsActions.append(applyButton, document.createTextNode(' '), saveButton);
+        settingsActions.className = partClass('settings-actions');
+        settingsActions.append(applyButton, saveButton);
         settingsPanel.appendChild(settingsActions);
 
+        const placeSettingsPanel = () => {
+            const anchor = settingsButton;
+            if (!anchor?.isConnected || !settingsPanel.matches(':popover-open')) return;
+            const gap = 4;
+            const button = anchor.getBoundingClientRect();
+            const panel = settingsPanel.getBoundingClientRect();
+            const below = button.bottom + gap;
+            const above = button.top - gap - panel.height;
+            const top = below + panel.height <= window.innerHeight || above < 0 ? below : above;
+            const left = Math.max(gap, Math.min(button.right - panel.width, window.innerWidth - panel.width - gap));
+            settingsPanel.style.top = `${Math.max(gap, top)}px`;
+            settingsPanel.style.left = `${left}px`;
+        };
+
         settingsPanel.addEventListener('toggle', event => {
-            if (event.newState === 'open') {
-                settingsCheckboxes.forEach(({ column, checkbox }) => { checkbox.checked = column.active !== false; });
-            }
+            if (event.newState !== 'open') return;
+            settingsCheckboxes.forEach(({ column, checkbox }) => { checkbox.checked = column.active !== false; });
+            placeSettingsPanel();
         }, { signal });
+
+        window.addEventListener('resize', placeSettingsPanel, { signal });
+        window.addEventListener('scroll', placeSettingsPanel, { signal, capture: true });
     }
 
     const inlineSettings = settingsButton && !externalSettingsElement;
+    const captionActions = inlineSettings && actionsPreset === 'caption';
+    const bottomActions = inlineSettings && actionsPreset === 'bottom';
 
-    if (caption || inlineSettings) {
+    const makeActions = () => {
+        const group = document.createElement('span');
+        group.className = partClass('actions');
+        group.style.float = 'right';
+        group.append(refreshButton, settingsButton);
+        return group;
+    };
+
+    if (caption || captionActions) {
         const tr = document.createElement('tr');
+        tr.className = partClass('caption');
         const td = document.createElement('td');
         td.colSpan = totalCols;
         if (caption) td.innerHTML = caption;
-        if (inlineSettings) {
-            settingsButton.style.float = 'right';
-            refreshButton.style.float = 'right';
-            td.insertBefore(settingsButton, td.firstChild);
-            settingsButton.after(refreshButton);
-        }
+        if (captionActions) td.insertBefore(makeActions(), td.firstChild);
         tr.appendChild(td);
         colSpanCells.push(td);
-        thead.appendChild(addBorders(tr));
+        thead.appendChild(tr);
     }
 
     if (settingsButton && externalSettingsElement) externalSettingsElement.replaceChildren(refreshButton, settingsButton);
@@ -399,7 +462,9 @@ function vGrid(config) {
 
     if (externalPaginationElement) {
         const info = document.createElement('span');
+        info.className = partClass('count');
         const pager = document.createElement('span');
+        pager.className = partClass('pager');
         externalPaginationElement.replaceChildren(info, document.createTextNode(' '), pager);
         infoEls.push(info);
         pagerEls.push(pager);
@@ -429,11 +494,15 @@ function vGrid(config) {
 
     const makeBar = () => {
         const tr = document.createElement('tr');
+        tr.className = partClass('pagination');
         const td = document.createElement('td');
         td.colSpan = totalCols;
         const left = document.createElement('span');
+        left.className = partClass('count');
         const center = document.createElement('span');
+        center.className = partClass('pager');
         const right = document.createElement('span');
+        right.className = partClass('rows-per-page');
 
         if (showPagination) {
             infoEls.push(left);
@@ -463,12 +532,13 @@ function vGrid(config) {
         td.append(left, document.createTextNode(' '), center, document.createTextNode(' '), right);
         tr.appendChild(td);
         colSpanCells.push(td);
-        return addBorders(tr);
+        return tr;
     };
 
     if (rowsPerPage && (showPagination || showRowsPerPage)) thead.appendChild(makeBar());
 
     const headerRow = document.createElement('tr');
+    headerRow.className = partClass('header');
     const headerCells = [];
     const columnHeaders = [];
     const columnHeaderLabels = [];
@@ -510,16 +580,14 @@ function vGrid(config) {
             columnHeaderLabels.push(th.textContent);
         });
         if (hasPanels) {
-            placeToggleCells(cells, sub => {
+            placeToggleCells(cells, () => {
                 const th = document.createElement('th');
                 th.scope = 'col';
-                if (!sub.toggleMarkup) th.width = '28';
                 return clipCell(th);
             });
         }
         headerCells.push(...cells);
         headerRow.replaceChildren(...cells);
-        addBorders(headerRow);
     };
 
     buildHeaderRow();
@@ -527,6 +595,7 @@ function vGrid(config) {
 
     const filterInputs = [];
     const filterRowElement = filterRow ? document.createElement('tr') : null;
+    if (filterRowElement) filterRowElement.className = partClass('filter');
 
     const buildFilterRow = () => {
         if (!filterRowElement) return;
@@ -538,6 +607,7 @@ function vGrid(config) {
             if (col.filter !== false) {
                 if (col.filterType === 'select') {
                     const select = document.createElement('select');
+                    select.className = partClass(`filter-${col.name}`);
                     select.dataset.col = String(i);
                     (col.filterOptions || '').split(';').forEach(pair => {
                         const sep = pair.indexOf(':');
@@ -553,6 +623,7 @@ function vGrid(config) {
                     filterInputs.push(select);
                 } else {
                     const input = document.createElement('input');
+                    input.className = partClass(`filter-${col.name}`);
                     input.type = 'text';
                     input.placeholder = col.label || col.name;
                     input.dataset.col = String(i);
@@ -566,7 +637,6 @@ function vGrid(config) {
         });
         if (hasPanels) placeToggleCells(cells, () => clipCell(document.createElement('td')));
         filterRowElement.replaceChildren(...cells);
-        addBorders(filterRowElement);
         filterInputs.forEach(inp => inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => {
             currentPage = 1;
             if (isRemote) {
@@ -596,9 +666,9 @@ function vGrid(config) {
         }
     };
 
-    const SUBGRID_CLOSED = '\u25B8\uFE0E';
-    const SUBGRID_OPEN = '\u25BE\uFE0E';
-    const SUBGRID_EASE_MS = 220;
+    const SUBGRID_CLOSED = '\uFF0B';
+    const SUBGRID_OPEN = '\uFF0D';
+    const SUBGRID_MENU = '\u22EE';
 
     const panelValue = (panel, row) => {
         const value = row?.[panel.id];
@@ -626,7 +696,7 @@ function vGrid(config) {
         return params.length ? `${base}${base.includes('?') ? '&' : '?'}${params.join('&')}` : base;
     };
 
-    const createToggle = sub => {
+    const createToggle = (sub, panelCount = 1) => {
         const markupNode = () => {
             if (!sub.toggleMarkup) return null;
             const template = document.createElement('template');
@@ -638,22 +708,51 @@ function vGrid(config) {
             node.style.cursor = 'pointer';
             return node;
         };
+        const toggleClasses = partClass('toggle-subgrid', partClass(`toggle-subgrid-${sub.order + 1}`)).split(' ');
+        const opensMenu = panelCount > 1;
         const node = markupNode();
         if (node) {
-            node.setAttribute('aria-haspopup', 'menu');
+            node.classList.add(...toggleClasses);
+            if (opensMenu) {
+                node.dataset.vgridMenu = '1';
+                node.setAttribute('aria-haspopup', 'menu');
+            }
             return node;
         }
         const button = document.createElement('button');
         button.type = 'button';
-        button.textContent = SUBGRID_CLOSED;
-        button.setAttribute('aria-haspopup', 'menu');
+        button.className = toggleClasses.join(' ');
+        if (opensMenu) {
+            button.dataset.vgridMenu = '1';
+            button.setAttribute('aria-haspopup', 'menu');
+        }
+        button.textContent = opensMenu ? SUBGRID_MENU : SUBGRID_CLOSED;
         return button;
+    };
+
+    const panelNotice = (kind, text) => {
+        const box = document.createElement('div');
+        box.className = partClass(`panel-${kind}`);
+        if (kind === 'loading') {
+            const spinner = document.createElement('span');
+            spinner.className = 'vgrid-spinner';
+            spinner.setAttribute('aria-hidden', 'true');
+            box.appendChild(spinner);
+        }
+        box.appendChild(document.createTextNode(text));
+        return box;
+    };
+
+    const failureReason = error => {
+        const message = String(error?.message || '').trim();
+        if (/^\d{3}$/.test(message)) return `the server answered ${message}`;
+        return message ? message.charAt(0).toLowerCase() + message.slice(1) : 'the response could not be read';
     };
 
     const panelLabel = panel => panel?.label || panel?.name || 'details';
 
     const setToggleState = (sub, toggle, open, panel) => {
-        if (!sub.toggleMarkup) toggle.textContent = open ? SUBGRID_OPEN : SUBGRID_CLOSED;
+        if (!sub.toggleMarkup) toggle.textContent = toggle.dataset.vgridMenu ? SUBGRID_MENU : open ? SUBGRID_OPEN : SUBGRID_CLOSED;
         toggle.title = open ? `Showing ${panelLabel(panel)}` : toggle.dataset.vgridPanel ? `Show ${toggle.dataset.vgridPanel}` : 'Choose what to show';
         toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     };
@@ -675,14 +774,13 @@ function vGrid(config) {
         };
         const caption = panelCaption(panel);
         const content = document.createElement('div');
-        if (caption) {
-            const captionEl = document.createElement('div');
-            captionEl.className = 'vgrid-subgrid-caption';
-            captionEl.innerHTML = caption;
-            body.replaceChildren(captionEl, content);
-        } else {
-            body.replaceChildren(content);
-        }
+        const captionEl = document.createElement('div');
+        captionEl.className = partClass('subgrid-caption');
+        const captionText = document.createElement('span');
+        captionText.className = partClass('subgrid-title');
+        if (caption) captionText.innerHTML = caption;
+        captionEl.append(captionText, entry.close);
+        body.replaceChildren(captionEl, content);
         const value = panelValue(panel, row);
         if (value === '') {
             content.textContent = `No "${panel.id}" value on this row.`;
@@ -691,8 +789,7 @@ function vGrid(config) {
         }
         if (panel.type === 'grid') {
             const host = document.createElement('div');
-            const loading = document.createElement('div');
-            loading.textContent = 'Loading…';
+            const loading = panelNotice('loading', 'Loading\u2026');
             host.hidden = true;
             content.replaceChildren(loading, host);
             entry.instance = vGrid({
@@ -703,8 +800,12 @@ function vGrid(config) {
                 headers: panel.headers || {},
                 rowsPerPage: panel.rowsPerPage || 10,
                 externalFilters: panel.externalFilters || {},
+                borders: panel.borders || borderPreset,
+                size: panel.size || 'medium',
+                easing: panel.easing ?? easingMs,
+                namespace: namePrefix,
                 settings: false,
-                onPage: () => {
+                onReady: () => {
                     if (entry.token !== token) return;
                     loading.remove();
                     host.hidden = false;
@@ -713,18 +814,19 @@ function vGrid(config) {
             });
             return;
         }
-        content.textContent = 'Loading\u2026';
+        content.replaceChildren(panelNotice('loading', 'Loading\u2026'));
         const url = panelUrl(panel, value);
         fetch(url, { signal, method: panel.method || 'GET', headers: requestHeaders(url, panel.headers) })
-            .then(response => { if (!response.ok) throw new Error(response.status); return response.text(); })
+            .then(response => { if (!response.ok) throw new Error(String(response.status)); return response.text(); })
             .then(text => {
                 if (!content.isConnected || entry.token !== token) return;
-                if (panel.type === 'html') {
+                if (!String(text).trim()) {
+                    content.replaceChildren(panelNotice('empty', `Nothing to show here for ${panelLabel(panel)}.`));
+                } else if (panel.type === 'html') {
                     content.innerHTML = text;
                 } else {
                     const pre = document.createElement('pre');
-                    pre.style.margin = '0';
-                    pre.style.whiteSpace = 'pre-wrap';
+                    pre.className = partClass('panel-text');
                     pre.textContent = text;
                     content.replaceChildren(pre);
                 }
@@ -732,7 +834,8 @@ function vGrid(config) {
             })
             .catch(error => {
                 if (error.name === 'AbortError' || !content.isConnected || entry.token !== token) return;
-                content.textContent = 'Failed to load.';
+                content.replaceChildren(panelNotice('error', `${panelLabel(panel)} could not be loaded: ${failureReason(error)}.`));
+                console.error('vGrid panel error:', panel?.name, error);
                 ready();
             });
     };
@@ -787,7 +890,7 @@ function vGrid(config) {
             if (event.target === entry.slide && event.propertyName === 'height') finish();
         };
         entry.slide.addEventListener('transitionend', onEnd, { signal });
-        timer = setTimeout(finish, SUBGRID_EASE_MS + 150);
+        timer = setTimeout(finish, easingMs + 150);
         entry.slide.style.height = `${current}px`;
         void entry.slide.offsetHeight;
         entry.slide.style.height = '0px';
@@ -804,29 +907,28 @@ function vGrid(config) {
         panelRow.dataset.vgridSubgrid = '1';
         const cell = document.createElement('td');
         cell.colSpan = totalCols;
-        cell.className = 'vgrid-subgrid-cell';
+        cell.className = partClass('subgrid-cell');
         const slide = document.createElement('div');
-        slide.className = 'vgrid-subgrid-slide';
-        slide.style.cssText = `height:0;overflow:hidden;transition:height ${SUBGRID_EASE_MS}ms ease;`;
+        slide.className = partClass('subgrid-slide');
+        slide.style.height = '0px';
+        slide.style.overflow = 'hidden';
         const clip = document.createElement('div');
-        clip.className = 'vgrid-subgrid-clip';
+        clip.className = partClass('subgrid-clip');
         const body = document.createElement('div');
-        body.className = 'vgrid-subgrid-body';
+        body.className = partClass('subgrid-body');
         const close = document.createElement('button');
         close.type = 'button';
-        close.className = 'vgrid-subgrid-close';
+        close.className = partClass('subgrid-close');
         close.textContent = '\u00D7';
         close.title = 'Close';
         close.setAttribute('aria-label', 'Close');
         close.addEventListener('click', () => closePanel(sub, tr), { signal });
-        const entry = { panelRow, toggle, body, slide, clip, state: 'opening', ready: false, observer: null, instance: null, panel: null };
+        const entry = { panelRow, toggle, body, slide, clip, close, state: 'opening', ready: false, observer: null, instance: null, panel: null };
         sub.entries.set(tr, entry);
-        clip.appendChild(close);
         clip.appendChild(body);
         slide.appendChild(clip);
         cell.appendChild(slide);
         panelRow.appendChild(cell);
-        addBorders(panelRow);
         const attached = panelRowsOf(tr);
         (attached[attached.length - 1] || tr).after(panelRow);
         slide.style.height = '0px';
@@ -855,26 +957,38 @@ function vGrid(config) {
         subgrids.forEach(sub => { if (sub.menu.matches(':popover-open')) sub.menu.hidePopover(); });
     };
 
-    const panelMenuItem = (text, current) => {
+    const panelMenuItem = (text, current, selectable = true) => {
         const item = document.createElement('button');
         item.type = 'button';
-        item.setAttribute('role', 'menuitem');
+        item.className = partClass('panel-menu-item');
+        item.setAttribute('role', selectable ? 'menuitemradio' : 'menuitem');
+        if (selectable) item.setAttribute('aria-checked', current ? 'true' : 'false');
         item.textContent = text;
-        item.style.display = 'block';
-        item.style.width = '100%';
-        item.style.padding = '0.25em 0.75em';
-        item.style.border = '0';
-        item.style.background = 'transparent';
-        item.style.color = 'inherit';
-        item.style.font = 'inherit';
-        item.style.textAlign = 'left';
-        item.style.whiteSpace = 'nowrap';
-        item.style.cursor = 'pointer';
-        if (current) item.style.fontWeight = 'bold';
+        item.title = text;
         return item;
     };
 
     const availablePanels = (sub, row) => sub.panels.filter(panel => panelValue(panel, row) !== '');
+
+    const MENU_GAP = 2;
+    const MENU_MIN_HEIGHT = 120;
+    const placePanelMenu = sub => {
+        const toggle = sub.menuOwner;
+        if (!toggle?.isConnected || !sub.menu.matches(':popover-open')) return;
+        const rect = toggle.getBoundingClientRect();
+        const spaceBelow = window.innerHeight - rect.bottom - MENU_GAP * 2;
+        const spaceAbove = rect.top - MENU_GAP * 2;
+        sub.menu.style.maxHeight = '';
+        const wanted = sub.menu.scrollHeight;
+        const above = wanted > spaceBelow && spaceAbove > spaceBelow;
+        sub.menu.style.maxHeight = `${Math.max(MENU_MIN_HEIGHT, above ? spaceAbove : spaceBelow)}px`;
+        const height = sub.menu.offsetHeight;
+        const width = sub.menu.offsetWidth;
+        const top = above ? rect.top - MENU_GAP - height : rect.bottom + MENU_GAP;
+        const preferred = rect.left + width > window.innerWidth - MENU_GAP ? rect.right - width : rect.left;
+        sub.menu.style.top = `${Math.max(MENU_GAP, Math.min(top, window.innerHeight - height - MENU_GAP))}px`;
+        sub.menu.style.left = `${Math.max(MENU_GAP, Math.min(preferred, window.innerWidth - width - MENU_GAP))}px`;
+    };
 
     const showPanelMenu = (sub, tr, row, toggle) => {
         const available = availablePanels(sub, row);
@@ -893,41 +1007,40 @@ function vGrid(config) {
             sub.menu.appendChild(item);
         });
         if (entry) {
-            const hide = panelMenuItem('Hide', false);
+            const hide = panelMenuItem('Hide', false, false);
             hide.addEventListener('click', () => {
                 hidePanelMenus();
                 closePanel(sub, tr);
             }, { signal });
             sub.menu.appendChild(hide);
         }
-        const rect = toggle.getBoundingClientRect();
-        sub.menu.style.maxHeight = `${window.innerHeight - 4}px`;
-        sub.menu.style.top = `${rect.bottom + 2}px`;
-        sub.menu.style.left = `${rect.left}px`;
         sub.menuOwner = toggle;
+        sub.menu.style.maxHeight = '';
         sub.menu.showPopover();
-        sub.menu.style.top = `${Math.max(2, Math.min(rect.bottom + 2, window.innerHeight - sub.menu.offsetHeight - 2))}px`;
-        sub.menu.style.left = `${Math.max(2, Math.min(rect.left, window.innerWidth - sub.menu.offsetWidth - 2))}px`;
+        placePanelMenu(sub);
         (focusItem || sub.menu.firstElementChild)?.focus();
     };
 
     subgrids.forEach(sub => {
         sub.menu.setAttribute('popover', '');
         sub.menu.setAttribute('role', 'menu');
-        sub.menu.style.position = 'fixed';
-        sub.menu.style.inset = 'auto';
-        sub.menu.style.margin = '0';
-        sub.menu.style.padding = '0.25em 0';
-        sub.menu.style.border = '1px solid';
-        sub.menu.style.background = 'Canvas';
-        sub.menu.style.color = 'CanvasText';
-        sub.menu.style.overflowY = 'auto';
-        sub.menu.style.overscrollBehavior = 'contain';
-        sub.menu.style.boxSizing = 'border-box';
+        sub.menu.className = partClass('panel-menu', partClass(`panel-menu-${sub.order + 1}`));
         sub.menu.addEventListener('toggle', event => {
             if (event.newState === 'closed') sub.menuClosedAt = Date.now();
         }, { signal });
-        document.body.appendChild(sub.menu);
+        window.addEventListener('resize', () => placePanelMenu(sub), { signal });
+        window.addEventListener('scroll', () => placePanelMenu(sub), { signal, capture: true });
+        sub.menu.addEventListener('keydown', event => {
+            const items = [...sub.menu.children];
+            if (!items.length) return;
+            const at = items.indexOf(document.activeElement);
+            const step = event.key === 'ArrowDown' ? 1 : event.key === 'ArrowUp' ? -1 : 0;
+            if (step) items[(at + step + items.length) % items.length].focus();
+            else if (event.key === 'Home') items[0].focus();
+            else if (event.key === 'End') items[items.length - 1].focus();
+            else return;
+            event.preventDefault();
+        }, { signal });
     });
 
     const clearSubgrids = () => {
@@ -942,14 +1055,30 @@ function vGrid(config) {
         });
     };
 
-    const dataRows = () => Array.from(tbody.rows).filter(tr => !tr.dataset.vgridSubgrid);
+    const dataRows = () => Array.from(tbody.rows).filter(tr => !tr.dataset.vgridSubgrid && !tr.dataset.vgridEmpty);
+
+    const emptyRow = () => {
+        const tr = document.createElement('tr');
+        tr.dataset.vgridEmpty = '1';
+        tr.className = partClass('empty');
+        const td = document.createElement('td');
+        td.colSpan = totalCols;
+        td.textContent = 'No records to show.';
+        tr.appendChild(td);
+        colSpanCells.push(td);
+        return tr;
+    };
 
     const buildRows = (rows, offset = 0) => {
         clearSubgrids();
         tbody.innerHTML = '';
+        if (!rows.length) {
+            tbody.appendChild(emptyRow());
+            return;
+        }
         rows.forEach((row, index) => {
             const tr = document.createElement('tr');
-            if (row.id !== undefined) tr.id = row.id;
+            tr.className = partClass('row', row.id !== undefined && namePrefix ? `${namePrefix}-row-${row.id}` : '');
             const cells = [];
             if (rowNumbers) {
                 const td = document.createElement('td');
@@ -982,10 +1111,11 @@ function vGrid(config) {
                     const td = document.createElement('td');
                     const available = availablePanels(sub, row);
                     if (available.length) {
-                        const toggle = createToggle(sub);
+                        const toggle = createToggle(sub, available.length);
                         if (available.length === 1) toggle.dataset.vgridPanel = panelLabel(available[0]);
                         setToggleState(sub, toggle, false);
                         toggle.addEventListener('click', () => {
+                            if (sub.menuOwner === toggle && sub.menu.matches(':popover-open')) { hidePanelMenus(); return; }
                             if (sub.menuOwner === toggle && Date.now() - sub.menuClosedAt < 200) return;
                             if (available.length === 1) { selectPanel(sub, tr, row, toggle, available[0]); return; }
                             showPanelMenu(sub, tr, row, toggle);
@@ -1003,14 +1133,35 @@ function vGrid(config) {
                 });
             }
             cells.forEach(cell => tr.appendChild(cell));
-            tbody.appendChild(addBorders(tr));
+            tbody.appendChild(tr);
         });
     };
 
-    const showLoading = () => {
+    const loadingSpacer = () => {
+        const tr = document.createElement('tr');
+        tr.dataset.vgridLoadingSpace = '1';
+        tr.className = partClass('loading-space');
+        const td = document.createElement('td');
+        td.colSpan = totalCols;
+        tr.appendChild(td);
+        colSpanCells.push(td);
+        return tr;
+    };
+
+    const dropLoadingSpacer = () => {
+        Array.from(tbody.querySelectorAll('[data-vgrid-loading-space]')).forEach(tr => tr.remove());
+    };
+
+    const placeLoadingIndicator = () => {
         loadingIndicator.style.top = `${tbody.offsetTop}px`;
-        loadingIndicator.style.height = `${tbody.offsetHeight || 40}px`;
+        loadingIndicator.style.height = `${Math.max(tbody.offsetHeight, 40)}px`;
+    };
+
+    const showLoading = () => {
+        if (!tbody.rows.length) tbody.appendChild(loadingSpacer());
+        placeLoadingIndicator();
         Array.from(tbody.rows).forEach(row => {
+            if (row.dataset.vgridLoadingSpace) return;
             row.style.filter = 'blur(1px)';
             row.style.opacity = '.55';
         });
@@ -1022,11 +1173,13 @@ function vGrid(config) {
             loadingIndicator.setAttribute('aria-live', 'polite');
             loadingIndicator.hidden = false;
             loadingIndicator.style.display = 'flex';
+            placeLoadingIndicator();
         }, 200);
     };
 
     const hideLoading = () => {
         clearTimeout(loadingShowTimer);
+        dropLoadingSpacer();
         Array.from(tbody.rows).forEach(row => {
             row.style.filter = '';
             row.style.opacity = '';
@@ -1039,26 +1192,43 @@ function vGrid(config) {
 
     if (rowsPerPage && (showPagination || showRowsPerPage)) tfoot.appendChild(makeBar());
 
+    if (bottomActions) {
+        const tr = document.createElement('tr');
+        tr.className = partClass('actions-row');
+        const td = document.createElement('td');
+        td.colSpan = totalCols;
+        td.appendChild(makeActions());
+        tr.appendChild(td);
+        colSpanCells.push(td);
+        tfoot.appendChild(tr);
+    }
+
     element.innerHTML = '';
     element.appendChild(colgroup);
     element.appendChild(thead);
     element.appendChild(tbody);
-    if (rowsPerPage && (showPagination || showRowsPerPage)) element.appendChild(tfoot);
+    if ((rowsPerPage && (showPagination || showRowsPerPage)) || bottomActions) element.appendChild(tfoot);
     const gridWrapper = document.createElement('div');
+    gridWrapper.className = 'vgrid-wrapper';
+    gridWrapper.dataset.vgridBorders = borderPreset;
+    gridWrapper.dataset.vgridSize = sizePreset;
     gridWrapper.style.cssText = 'display:block;position:relative;width:100%;overflow:hidden;';
+    gridWrapper.style.setProperty('--vgrid-easing', `${easingMs}ms`);
     element.replaceWith(gridWrapper);
     gridWrapper.appendChild(element);
     gridWrapper.appendChild(settingsPanel);
+    subgrids.forEach(sub => gridWrapper.appendChild(sub.menu));
     loadingIndicator = document.createElement('output');
     loadingIndicator.setAttribute('aria-live', 'polite');
     loadingIndicator.hidden = true;
-    loadingIndicator.style.cssText = 'position:absolute;left:0;width:100%;display:none;align-items:center;justify-content:center;pointer-events:none;';
+    loadingIndicator.style.cssText = 'position:absolute;left:0;width:100%;display:none;align-items:center;justify-content:center;padding:0 .5em;box-sizing:border-box;pointer-events:none;';
     loadingBadge = document.createElement('span');
     loadingBadge.className = 'vgrid-loading-badge';
     loadingSpinner = document.createElement('span');
     loadingSpinner.className = 'vgrid-spinner';
     loadingSpinner.setAttribute('aria-hidden', 'true');
     loadingText = document.createElement('span');
+    loadingText.className = 'vgrid-loading-text';
     loadingBadge.append(loadingSpinner, loadingText);
     loadingIndicator.appendChild(loadingBadge);
     gridWrapper.appendChild(loadingIndicator);
@@ -1119,9 +1289,15 @@ function vGrid(config) {
             : { headers: requestHeaders(url), signal: fetchAbort.signal };
 
         fetch(url, fetchOpts)
-            .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
-            .then(({ data: rows, total, page: pg, limit: ps2, summary }) => {
-                if (!Array.isArray(rows)) throw new Error('response field "data" must be an array');
+            .then(r => {
+                if (!r.ok) throw new Error(`The server answered ${r.status}${r.statusText ? ` ${r.statusText}` : ''}`);
+                return r.json().catch(() => { throw new Error('The response is not valid JSON'); });
+            })
+            .then(body => {
+                if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('The response is not an object carrying a "data" array');
+                const { data: rows, total, page: pg, limit: ps2, summary } = body;
+                if (rows === undefined) throw new Error('The response has no "data" field');
+                if (!Array.isArray(rows)) throw new Error('The "data" field is not an array');
                 const totalRows = Number.isFinite(total) ? total : rows.length;
                 const pageSize  = Number.isFinite(ps2) && ps2 > 0 ? ps2 : null;
                 const pageNo    = Number.isFinite(pg) && pg > 0 ? pg : currentPage;
@@ -1144,6 +1320,7 @@ function vGrid(config) {
                     pagerEls.forEach(el => renderPageButtons(el, totalPages));
                     onPage?.({ page: pageNo, rowsPerPage: pageSize, total: totalRows });
                 }
+                onReady?.({ total: totalRows, rows: rows.length });
             })
             .catch(err => {
                 if (err.name === 'AbortError') return;
@@ -1154,11 +1331,13 @@ function vGrid(config) {
                 });
                 loadingBadge.classList.add('vgrid-loading-error');
                 loadingSpinner.hidden = true;
-                loadingText.textContent = 'Failed to load data.';
+                loadingText.textContent = `${err.message || 'The data could not be loaded'}.`;
                 loadingIndicator.setAttribute('aria-live', 'assertive');
                 loadingIndicator.hidden = false;
                 loadingIndicator.style.display = 'flex';
+                placeLoadingIndicator();
                 console.error('vGrid fetch error:', err);
+                onReady?.({ error: err });
             });
     };
 
@@ -1173,25 +1352,27 @@ function vGrid(config) {
         pagerEl.innerHTML = '';
         const btn = (label, page, disabled, active, ariaLabel) => {
             const b = document.createElement('button');
+            b.type = 'button';
             b.textContent = label;
-            b.setAttribute('aria-current', active ? 'page' : 'false');
+            if (active) b.setAttribute('aria-current', 'page');
             if (ariaLabel) b.setAttribute('aria-label', ariaLabel);
             b.disabled = disabled;
             b.addEventListener('click', () => { currentPage = page; render(); }, { signal });
             return b;
         };
         pagerEl.appendChild(btn('«', 1, currentPage === 1, false, 'First page'));
-        pagerEl.appendChild(btn('←', currentPage - 1, currentPage === 1, false, 'Previous page'));
+        pagerEl.appendChild(btn('‹', currentPage - 1, currentPage === 1, false, 'Previous page'));
         pageRange(currentPage, totalPages).forEach(p => {
             if (p === '…') {
                 const span = document.createElement('span');
+                span.className = partClass('pager-ellipsis');
                 span.textContent = '…';
                 pagerEl.appendChild(span);
             } else {
                 pagerEl.appendChild(btn(p, p, false, p === currentPage));
             }
         });
-        pagerEl.appendChild(btn('→', currentPage + 1, currentPage === totalPages, false, 'Next page'));
+        pagerEl.appendChild(btn('›', currentPage + 1, currentPage === totalPages, false, 'Next page'));
         pagerEl.appendChild(btn('»', totalPages, currentPage === totalPages, false, 'Last page'));
     };
 
@@ -1330,7 +1511,8 @@ function vGrid(config) {
         const widths = headerCells.map((th, i) => {
             const configured = pixelWidth(columnAtCell(i)?.width);
             const width = configured ?? th.getBoundingClientRect().width;
-            return Math.max(MIN_COLUMN_WIDTH, width || MIN_COLUMN_WIDTH);
+            const minimum = isToggleCell(i) ? 0 : MIN_COLUMN_WIDTH;
+            return Math.max(minimum, width || minimum);
         });
         headerCells.forEach(th => th.removeAttribute('width'));
         element.style.tableLayout = 'fixed';
