@@ -181,17 +181,23 @@ function vGrid(config) {
             console.error(`vGrid: external filter for "${column}" was not found.`);
             return false;
         });
-    const externalRowsPerPageElement = typeof externalRowsPerPage === 'string'
-        ? document.querySelector(externalRowsPerPage)
-        : externalRowsPerPage;
+    const resolveExternalAll = selector => typeof selector === 'string'
+        ? [...document.querySelectorAll(selector)]
+        : selector == null ? []
+        : Array.isArray(selector) || selector instanceof NodeList
+            ? [...selector].flatMap(one => resolveExternalAll(one))
+            : [selector];
+
+    const externalRowsPerPageElements = resolveExternalAll(externalRowsPerPage);
+    const externalRowsPerPageElement = externalRowsPerPageElements[0];
 
     if (externalRowsPerPage && !externalRowsPerPageElement) {
         console.error('vGrid: external rows-per-page control was not found.');
     }
 
     const resolveExternal = selector => typeof selector === 'string' ? document.querySelector(selector) : selector;
-    const externalPaginationElement = resolveExternal(externalPagination);
-    if (externalPagination && !externalPaginationElement) {
+    const externalPaginationElements = resolveExternalAll(externalPagination);
+    if (externalPagination && !externalPaginationElements.length) {
         console.error('vGrid: external pagination control was not found.');
     }
     const externalSettingsElement = resolveExternal(externalSettings);
@@ -460,15 +466,15 @@ function vGrid(config) {
 
     const infoEls = [], pagerEls = [], rowsPerPageSelects = [];
 
-    if (externalPaginationElement) {
+    externalPaginationElements.forEach(container => {
         const info = document.createElement('span');
         info.className = partClass('count');
         const pager = document.createElement('span');
         pager.className = partClass('pager');
-        externalPaginationElement.replaceChildren(info, document.createTextNode(' '), pager);
+        container.replaceChildren(info, document.createTextNode(' '), pager);
         infoEls.push(info);
         pagerEls.push(pager);
-    }
+    });
 
     const pageSizeOptions = total => [...new Set(rowsPerPageOptions
         ? [...rowsPerPageOptions, rowsPerPage]
@@ -799,6 +805,8 @@ function vGrid(config) {
                 method: panel.method || 'GET',
                 headers: panel.headers || {},
                 rowsPerPage: panel.rowsPerPage || 10,
+                rowNumbers: panel.rowNumbers ?? rowNumbers,
+                rowNumbersType: panel.rowNumbersType || rowNumbersType,
                 externalFilters: panel.externalFilters || {},
                 borders: panel.borders || borderPreset,
                 size: panel.size || 'medium',
@@ -972,22 +980,45 @@ function vGrid(config) {
 
     const MENU_GAP = 2;
     const MENU_MIN_HEIGHT = 120;
-    const placePanelMenu = sub => {
+    const menuAnchored = sub => {
         const toggle = sub.menuOwner;
-        if (!toggle?.isConnected || !sub.menu.matches(':popover-open')) return;
+        return toggle?.isConnected && sub.menu.matches(':popover-open') ? toggle : null;
+    };
+    const measurePanelMenu = sub => {
+        const toggle = menuAnchored(sub);
+        if (!toggle) return;
         const rect = toggle.getBoundingClientRect();
-        const spaceBelow = window.innerHeight - rect.bottom - MENU_GAP * 2;
-        const spaceAbove = rect.top - MENU_GAP * 2;
+        const limit = window.innerHeight - MENU_GAP * 2;
+        const anchorTop = Math.min(Math.max(rect.top, 0), window.innerHeight);
+        const anchorBottom = Math.min(Math.max(rect.bottom, 0), window.innerHeight);
+        const spaceBelow = window.innerHeight - anchorBottom - MENU_GAP * 2;
+        const spaceAbove = anchorTop - MENU_GAP * 2;
         sub.menu.style.maxHeight = '';
         const wanted = sub.menu.scrollHeight;
-        const above = wanted > spaceBelow && spaceAbove > spaceBelow;
-        sub.menu.style.maxHeight = `${Math.max(MENU_MIN_HEIGHT, above ? spaceAbove : spaceBelow)}px`;
+        sub.menuAbove = wanted > spaceBelow && spaceAbove > spaceBelow;
+        sub.menu.style.maxHeight = `${Math.min(limit, Math.max(MENU_MIN_HEIGHT, sub.menuAbove ? spaceAbove : spaceBelow))}px`;
+    };
+    const placePanelMenu = sub => {
+        const toggle = menuAnchored(sub);
+        if (!toggle) return;
+        const rect = toggle.getBoundingClientRect();
         const height = sub.menu.offsetHeight;
         const width = sub.menu.offsetWidth;
-        const top = above ? rect.top - MENU_GAP - height : rect.bottom + MENU_GAP;
+        const top = sub.menuAbove ? rect.top - MENU_GAP - height : rect.bottom + MENU_GAP;
         const preferred = rect.left + width > window.innerWidth - MENU_GAP ? rect.right - width : rect.left;
         sub.menu.style.top = `${Math.max(MENU_GAP, Math.min(top, window.innerHeight - height - MENU_GAP))}px`;
         sub.menu.style.left = `${Math.max(MENU_GAP, Math.min(preferred, window.innerWidth - width - MENU_GAP))}px`;
+    };
+    const trackPanelMenu = sub => {
+        if (sub.menuFrame) return;
+        sub.menuFrame = requestAnimationFrame(() => {
+            sub.menuFrame = 0;
+            placePanelMenu(sub);
+        });
+    };
+    const resizePanelMenu = sub => {
+        measurePanelMenu(sub);
+        placePanelMenu(sub);
     };
 
     const showPanelMenu = (sub, tr, row, toggle) => {
@@ -1017,7 +1048,7 @@ function vGrid(config) {
         sub.menuOwner = toggle;
         sub.menu.style.maxHeight = '';
         sub.menu.showPopover();
-        placePanelMenu(sub);
+        resizePanelMenu(sub);
         (focusItem || sub.menu.firstElementChild)?.focus();
     };
 
@@ -1028,8 +1059,11 @@ function vGrid(config) {
         sub.menu.addEventListener('toggle', event => {
             if (event.newState === 'closed') sub.menuClosedAt = Date.now();
         }, { signal });
-        window.addEventListener('resize', () => placePanelMenu(sub), { signal });
-        window.addEventListener('scroll', () => placePanelMenu(sub), { signal, capture: true });
+        window.addEventListener('resize', () => resizePanelMenu(sub), { signal });
+        window.addEventListener('scroll', event => {
+            if (event.target === sub.menu) return;
+            trackPanelMenu(sub);
+        }, { signal, capture: true });
         sub.menu.addEventListener('keydown', event => {
             const items = [...sub.menu.children];
             if (!items.length) return;
@@ -1601,13 +1635,12 @@ function vGrid(config) {
         render();
     }, { signal }));
 
-    if (externalRowsPerPageElement) {
-        externalRowsPerPageElement.addEventListener('change', () => {
-            pageSizeSource = 'external';
-            currentPage = 1;
-            render();
-        }, { signal });
-    }
+    externalRowsPerPageElements.forEach(select => select.addEventListener('change', () => {
+        externalRowsPerPageElements.forEach(other => { other.value = select.value; });
+        pageSizeSource = 'external';
+        currentPage = 1;
+        render();
+    }, { signal }));
 
     if (externalSortColumnElement) {
         externalSortColumnElement.addEventListener('change', () => {
