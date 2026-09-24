@@ -3,7 +3,7 @@ function vGrid(config) {
 
     const { el, caption, columns = [], data = [], dataSource, method = 'GET', headers = {},
         rowNumbers = true, rowNumbersType = 'sequential',
-        filterRow = true, sortBy, rowsPerPage: rowsPerPageConfig, rowsPerPageOptions: rowsPerPageOptionsConfig, showPaginationControls = true,
+        filterRow = true, filterClear = true, sortBy, rowsPerPage: rowsPerPageConfig, rowsPerPageOptions: rowsPerPageOptionsConfig, showPaginationControls = true,
         showPagination = showPaginationControls, showRowsPerPage = showPaginationControls,
         externalFilters = {}, externalRowsPerPage, externalPagination, externalSort = {}, externalSummary = {},
         settings = true, externalSettings, subgrid, borders = 'horizontal', size = 'medium', actions = 'caption', easing = 160,
@@ -600,17 +600,84 @@ function vGrid(config) {
     thead.appendChild(headerRow);
 
     const filterInputs = [];
+    const filterClears = [];
     const filterRowElement = filterRow ? document.createElement('tr') : null;
     if (filterRowElement) filterRowElement.className = partClass('filter');
+
+    const syncFilterClears = () => filterClears.forEach(({ control, button, pad }) => {
+        const filled = control.value !== '';
+        button.hidden = !filled;
+        control.style.paddingRight = filled ? pad : '';
+    });
+
+    const clearFilterInput = control => {
+        if (control.value === '') return;
+        control.focus();
+        if (control.tagName === 'SELECT') {
+            control.value = '';
+            control.dispatchEvent(new Event('change', { bubbles: true }));
+            return;
+        }
+        control.select();
+        let cleared = false;
+        try { cleared = document.execCommand('delete') && control.value === ''; }
+        catch { cleared = false; }
+        if (cleared) return;
+        control.value = '';
+        control.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    const addFilterClear = (control, col) => {
+        const isSelect = control.tagName === 'SELECT';
+        const wrap = document.createElement('span');
+        wrap.style.position = 'relative';
+        wrap.style.display = 'block';
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = partClass('filter-clear');
+        button.tabIndex = -1;
+        button.hidden = true;
+        button.textContent = '\u00D7';
+        button.setAttribute('aria-label', `Clear ${col.label || col.name} filter`);
+        button.style.position = 'absolute';
+        button.style.top = '0';
+        button.style.bottom = '0';
+        button.style.right = isSelect ? '1.2em' : '0';
+        button.style.width = '1.2em';
+        button.style.padding = '0';
+        button.style.border = '0';
+        button.style.background = 'none';
+        button.style.font = 'inherit';
+        button.style.lineHeight = '1';
+        button.style.color = 'inherit';
+        button.style.opacity = '.6';
+        button.style.cursor = 'pointer';
+        button.addEventListener('click', () => clearFilterInput(control), { signal });
+        button.addEventListener('mouseenter', () => { button.style.opacity = '1'; }, { signal });
+        button.addEventListener('mouseleave', () => { button.style.opacity = '.6'; }, { signal });
+        if (!isSelect) {
+            control.addEventListener('keydown', event => {
+                if (event.key !== 'Escape' || control.value === '') return;
+                event.preventDefault();
+                clearFilterInput(control);
+            }, { signal });
+        }
+        wrap.append(control, button);
+        filterClears.push({ control, button, pad: isSelect ? '2.4em' : '1.2em' });
+        return wrap;
+    };
 
     const buildFilterRow = () => {
         if (!filterRowElement) return;
         filterInputs.length = 0;
+        filterClears.length = 0;
         const cells = [];
         if (rowNumbers) cells.push(clipCell(document.createElement('td')));
         activeColumns.forEach((col, i) => {
             const td = document.createElement('td');
             if (col.filter !== false) {
+                let control;
+                let clearable = filterClear && col.filterClear !== false;
                 if (col.filterType === 'select') {
                     const select = document.createElement('select');
                     select.className = partClass(`filter-${col.name}`);
@@ -623,27 +690,27 @@ function vGrid(config) {
                         o.value = val; o.textContent = text;
                         select.appendChild(o);
                     });
-                    select.style.width = '100%';
-                    select.style.boxSizing = 'border-box';
-                    td.appendChild(select);
-                    filterInputs.push(select);
+                    clearable = clearable && [...select.options].some(option => option.value === '');
+                    control = select;
                 } else {
                     const input = document.createElement('input');
                     input.className = partClass(`filter-${col.name}`);
                     input.type = 'text';
                     input.placeholder = col.label || col.name;
                     input.dataset.col = String(i);
-                    input.style.width = '100%';
-                    input.style.boxSizing = 'border-box';
-                    td.appendChild(input);
-                    filterInputs.push(input);
+                    control = input;
                 }
+                control.style.width = '100%';
+                control.style.boxSizing = 'border-box';
+                td.appendChild(clearable ? addFilterClear(control, col) : control);
+                filterInputs.push(control);
             }
             cells.push(clipCell(td));
         });
         if (hasPanels) placeToggleCells(cells, () => clipCell(document.createElement('td')));
         filterRowElement.replaceChildren(...cells);
         filterInputs.forEach(inp => inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => {
+            syncFilterClears();
             currentPage = 1;
             if (isRemote) {
                 clearTimeout(filterTimer);
@@ -653,6 +720,7 @@ function vGrid(config) {
                 render();
             }
         }, { signal }));
+        syncFilterClears();
     };
 
     buildFilterRow();
@@ -1516,6 +1584,7 @@ function vGrid(config) {
             const value = keptFilters.get(activeColumns[parseInt(inp.dataset.col)]?.name);
             if (value) inp.value = value;
         });
+        syncFilterClears();
 
         columnsFrozen = false;
         element.style.tableLayout = 'auto';
