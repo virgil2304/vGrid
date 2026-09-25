@@ -1,4 +1,4 @@
-/* vGrid v1.0.0.5.39 | Last updated: 2026-09-17 */
+/* vGrid v1.0.0.5.40 | Last updated: 2026-09-25 */
 function vGrid(config) {
 
     const { el, caption, columns = [], data = [], dataSource, method = 'GET', headers = {},
@@ -7,6 +7,7 @@ function vGrid(config) {
         showPagination = showPaginationControls, showRowsPerPage = showPaginationControls,
         externalFilters = {}, externalRowsPerPage, externalPagination, externalSort = {}, externalSummary = {},
         settings = true, externalSettings, subgrid, borders = 'horizontal', size = 'medium', actions = 'caption', easing = 160,
+        download = false, print = true,
         onSort, onFilter, onPage, onReady, namespace } = config;
 
     const toPageSize = value => {
@@ -38,11 +39,94 @@ function vGrid(config) {
     }
     const sizePreset = sizePresets.includes(size) ? size : 'medium';
 
-    const actionsPresets = ['caption', 'bottom', 'none'];
-    if (!actionsPresets.includes(actions)) {
-        console.error(`vGrid: actions must be one of ${actionsPresets.join(', ')}.`);
+    const actionNames = ['clear', 'download', 'print', 'refresh', 'settings'];
+    const actionDefaults = {
+        clear: { symbol: '\u2715', title: 'Clear filters' },
+        download: { symbol: '\u2913', title: 'Download' },
+        print: { symbol: '\u2912', title: 'Print' },
+        refresh: { symbol: '\u21BB', title: 'Refresh' },
+        settings: { symbol: '\u2699\uFE0E', title: 'Settings' }
+    };
+    const actionsPositions = ['caption', 'bottom', 'none', 'external'];
+    const actionsIsObject = actions !== null && typeof actions === 'object' && !Array.isArray(actions);
+    if (!actionsIsObject && typeof actions !== 'string' && actions !== true && actions !== false) {
+        console.error('vGrid: actions must be true, false, a position name, or an object.');
     }
-    const actionsPreset = actionsPresets.includes(actions) ? actions : 'caption';
+    const actionsConfig = actionsIsObject ? actions
+        : typeof actions === 'string' ? { position: actions }
+        : actions === false ? { position: 'none' }
+        : {};
+    Object.keys(actionsConfig)
+        .filter(key => !['position', 'element', 'order'].includes(key) && !actionNames.includes(key))
+        .forEach(key => console.error(`vGrid: actions.${key} is not a known action.`));
+
+    const actionsPositionValue = actionsConfig.position ?? 'caption';
+    if (!actionsPositions.includes(actionsPositionValue)) {
+        console.error(`vGrid: actions.position must be one of ${actionsPositions.join(', ')}.`);
+    }
+    const actionsPosition = actionsPositions.includes(actionsPositionValue) ? actionsPositionValue : 'caption';
+
+    const requestedActionOrder = Array.isArray(actionsConfig.order) ? actionsConfig.order : [];
+    requestedActionOrder
+        .filter(name => !actionNames.includes(name))
+        .forEach(name => console.error(`vGrid: actions.order has no action named ${name}.`));
+    const orderedActionNames = [...new Set(requestedActionOrder.filter(name => actionNames.includes(name)))];
+    const actionsSequence = [...orderedActionNames, ...actionNames.filter(name => !orderedActionNames.includes(name))];
+
+    const downloadModes = ['server', 'view'];
+    const downloadRequest = (() => {
+        const value = actionsConfig.download;
+        if (value === undefined) return download;
+        if (value === true || value === false) return value;
+        if (typeof value === 'string') return downloadModes.includes(value) ? value : true;
+        if (value && typeof value === 'object') return value.active === false ? false : (value.mode ?? true);
+        return download;
+    })();
+    let downloadMode = null;
+    if (downloadRequest) {
+        if (downloadRequest === true) downloadMode = dataSource ? 'server' : 'view';
+        else if (downloadModes.includes(downloadRequest)) downloadMode = downloadRequest;
+        else console.error(`vGrid: download must be true, false, or one of ${downloadModes.join(', ')}.`);
+        if (downloadMode === 'server' && !dataSource) {
+            console.error("vGrid: download: 'server' needs a dataSource. Falling back to the rows in the grid.");
+            downloadMode = 'view';
+        }
+    }
+
+    if (print !== true && print !== false) {
+        console.error('vGrid: print must be true or false.');
+    }
+
+    const resolveAction = (name, fallbackActive) => {
+        const value = actionsConfig[name];
+        const base = { ...actionDefaults[name], active: fallbackActive };
+        if (value === undefined) return base;
+        if (value === true) return { ...base, active: true };
+        if (value === false) return { ...base, active: false };
+        if (typeof value === 'string') {
+            return name === 'download' && downloadModes.includes(value)
+                ? { ...base, active: true }
+                : { ...base, active: true, symbol: value };
+        }
+        if (value && typeof value === 'object') return { ...base, ...value, active: value.active !== false };
+        console.error(`vGrid: actions.${name} must be true, false, a symbol, or an object.`);
+        return base;
+    };
+
+    const settingsActive = settings !== false && columns.length > 0;
+    const resolvedActions = {
+        clear: resolveAction('clear', settingsActive),
+        download: resolveAction('download', downloadMode !== null),
+        print: resolveAction('print', print !== false && columns.length > 0),
+        refresh: resolveAction('refresh', settingsActive),
+        settings: resolveAction('settings', settingsActive)
+    };
+    if (!columns.length) {
+        resolvedActions.clear.active = false;
+        resolvedActions.print.active = false;
+        resolvedActions.settings.active = false;
+    }
+    if (!resolvedActions.download.active) downloadMode = null;
 
     const easingValue = Number(easing);
     if (!Number.isFinite(easingValue) || easingValue < 0) {
@@ -128,7 +212,7 @@ function vGrid(config) {
     const hasPanels = subgrids.length > 0;
 
     const settingsStorageKey = `vgrid:${typeof el === 'string' ? el : (el?.id || '')}:${dataSource || ''}:columns`;
-    if (settings && columns.length) {
+    if (resolvedActions.settings.active) {
         try {
             const saved = JSON.parse(localStorage.getItem(settingsStorageKey));
             if (saved && typeof saved === 'object') {
@@ -181,6 +265,9 @@ function vGrid(config) {
             console.error(`vGrid: external filter for "${column}" was not found.`);
             return false;
         });
+    const externalFilterDefaults = new Map(externalFilterInputs.map(({ element }) => [element, element.value]));
+    let resettingFilters = false;
+
     const resolveExternalAll = selector => typeof selector === 'string'
         ? [...document.querySelectorAll(selector)]
         : selector == null ? []
@@ -203,6 +290,14 @@ function vGrid(config) {
     const externalSettingsElement = resolveExternal(externalSettings);
     if (externalSettings && !externalSettingsElement) {
         console.error('vGrid: external settings control was not found.');
+    }
+    const actionsOwnElement = resolveExternal(actionsConfig.element);
+    if (actionsConfig.element && !actionsOwnElement) {
+        console.error('vGrid: actions.element was not found.');
+    }
+    const actionsElement = actionsOwnElement || externalSettingsElement;
+    if (actionsPosition === 'external' && !actionsElement) {
+        console.error("vGrid: actions.position 'external' needs actions.element. Falling back to the caption.");
     }
     const externalSortColumnElement = resolveExternal(externalSort.column);
     const externalSortDirectionElement = resolveExternal(externalSort.direction);
@@ -334,26 +429,41 @@ function vGrid(config) {
     const settingsPanel = document.createElement('div');
     let settingsButton = null;
     let refreshButton = null;
+    let clearFiltersButton = null;
+    let downloadButton = null;
+    let printButton = null;
 
-    if (settings && columns.length) {
-        refreshButton = document.createElement('button');
-        refreshButton.type = 'button';
-        refreshButton.title = 'Refresh';
-        refreshButton.textContent = '↻︎';
+    const makeActionButton = config => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        if (config.title) button.title = config.title;
+        if (config.className) button.className = config.className;
+        if (config.html instanceof Element) button.replaceChildren(config.html.cloneNode(true));
+        else if (typeof config.html === 'string') button.innerHTML = config.html;
+        else button.textContent = config.symbol ?? '';
+        return button;
+    };
+
+    if (resolvedActions.clear.active) {
+        clearFiltersButton = makeActionButton(resolvedActions.clear);
+        clearFiltersButton.addEventListener('click', () => resetFilters(), { signal });
+    }
+
+    if (resolvedActions.refresh.active) {
+        refreshButton = makeActionButton(resolvedActions.refresh);
         refreshButton.addEventListener('click', () => {
             if (isRemote) fetchData();
             else if (sortColIndex !== null && sortColIndex !== -1) applySort();
             else render();
         }, { signal });
+    }
 
+    if (resolvedActions.settings.active) {
         vGrid.instanceCount = (vGrid.instanceCount || 0) + 1;
         settingsPanel.id = `vgrid-settings-${vGrid.instanceCount}`;
         settingsPanel.className = partClass('settings');
         settingsPanel.setAttribute('popover', '');
-        settingsButton = document.createElement('button');
-        settingsButton.type = 'button';
-        settingsButton.title = 'Settings';
-        settingsButton.textContent = '\u2699\uFE0E';
+        settingsButton = makeActionButton(resolvedActions.settings);
         settingsButton.setAttribute('popovertarget', settingsPanel.id);
 
         const settingsClose = document.createElement('button');
@@ -438,15 +548,34 @@ function vGrid(config) {
         window.addEventListener('scroll', placeSettingsPanel, { signal, capture: true });
     }
 
-    const inlineSettings = settingsButton && !externalSettingsElement;
-    const captionActions = inlineSettings && actionsPreset === 'caption';
-    const bottomActions = inlineSettings && actionsPreset === 'bottom';
+    if (downloadMode) {
+        downloadButton = makeActionButton(resolvedActions.download);
+        downloadButton.addEventListener('click', () => startDownload(), { signal });
+    }
+
+    if (resolvedActions.print.active) {
+        printButton = makeActionButton(resolvedActions.print);
+        printButton.addEventListener('click', () => startPrint(), { signal });
+    }
+
+    const actionElements = {
+        clear: clearFiltersButton,
+        download: downloadButton,
+        print: printButton,
+        refresh: refreshButton,
+        settings: settingsButton
+    };
+    const actionButtons = actionsSequence.map(name => actionElements[name]).filter(Boolean);
+    const externalActions = actionButtons.length > 0 && !!actionsElement;
+    const inlineActions = actionButtons.length > 0 && !actionsElement && actionsPosition !== 'none';
+    const captionActions = inlineActions && actionsPosition !== 'bottom';
+    const bottomActions = inlineActions && actionsPosition === 'bottom';
 
     const makeActions = () => {
         const group = document.createElement('span');
         group.className = partClass('actions');
         group.style.float = 'right';
-        group.append(refreshButton, settingsButton);
+        group.append(...actionButtons);
         return group;
     };
 
@@ -462,7 +591,7 @@ function vGrid(config) {
         thead.appendChild(tr);
     }
 
-    if (settingsButton && externalSettingsElement) externalSettingsElement.replaceChildren(refreshButton, settingsButton);
+    if (externalActions) actionsElement.replaceChildren(...actionButtons);
 
     const infoEls = [], pagerEls = [], rowsPerPageSelects = [];
 
@@ -601,6 +730,7 @@ function vGrid(config) {
 
     const filterInputs = [];
     const filterClears = [];
+    const filterDefaults = new Map();
     const filterRowElement = filterRow ? document.createElement('tr') : null;
     if (filterRowElement) filterRowElement.className = partClass('filter');
 
@@ -625,6 +755,25 @@ function vGrid(config) {
         if (cleared) return;
         control.value = '';
         control.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+
+    const resetFilters = () => {
+        resettingFilters = true;
+        filterInputs.forEach(control => { control.value = filterDefaults.get(control) ?? ''; });
+        externalFilterInputs.forEach(({ element }) => {
+            const value = externalFilterDefaults.get(element) ?? '';
+            if (element.value === value) return;
+            element.value = value;
+            element.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        resettingFilters = false;
+        syncFilterClears();
+        clearTimeout(filterTimer);
+        currentPage = 1;
+        if (!isRemote) {
+            onFilter?.({ filters: filterInputs.map(i => ({ column: activeColumns[parseInt(i.dataset.col)]?.name, value: i.value })) });
+        }
+        render();
     };
 
     const addFilterClear = (control, col) => {
@@ -671,6 +820,7 @@ function vGrid(config) {
         if (!filterRowElement) return;
         filterInputs.length = 0;
         filterClears.length = 0;
+        filterDefaults.clear();
         const cells = [];
         if (rowNumbers) cells.push(clipCell(document.createElement('td')));
         activeColumns.forEach((col, i) => {
@@ -703,6 +853,7 @@ function vGrid(config) {
                 control.style.width = '100%';
                 control.style.boxSizing = 'border-box';
                 td.appendChild(clearable ? addFilterClear(control, col) : control);
+                filterDefaults.set(control, control.value);
                 filterInputs.push(control);
             }
             cells.push(clipCell(td));
@@ -881,6 +1032,7 @@ function vGrid(config) {
                 easing: panel.easing ?? easingMs,
                 namespace: namePrefix,
                 settings: false,
+                actions: false,
                 onReady: () => {
                     if (entry.token !== token) return;
                     loading.remove();
@@ -1348,10 +1500,7 @@ function vGrid(config) {
     const EDGE_TOLERANCE = 6;
     let pageSizeSource = externalRowsPerPageElement ? 'external' : 'grid';
 
-    const fetchData = () => {
-        if (fetchAbort) fetchAbort.abort();
-        fetchAbort = new AbortController();
-
+    const buildRequest = (extra = {}) => {
         const ps      = pageSizeSource === 'external' && externalRowsPerPageElement
             ? parseInt(externalRowsPerPageElement.value)
             : (rowsPerPageSelects[0] ? parseInt(rowsPerPageSelects[0].value) : (rowsPerPage || 0));
@@ -1371,9 +1520,7 @@ function vGrid(config) {
             payload.dir  = sortOrder || 'asc';
         }
         if (activeColumns.length !== columns.length) payload.columns = activeColumns.map(column => column.name).join(',');
-        Object.assign(payload, filter);
-
-        showLoading();
+        Object.assign(payload, filter, extra);
 
         const getUrl = () => {
             const p = new URLSearchParams({ page: payload.page });
@@ -1382,10 +1529,36 @@ function vGrid(config) {
             if (payload.dir)       p.set('dir', payload.dir);
             if (payload.columns)   p.set('columns', payload.columns);
             Object.entries(filter).forEach(([k, v]) => p.set(k, v));
+            Object.entries(extra).forEach(([k, v]) => p.set(k, v));
             return `${dataSource}${dataSource.includes('?') ? '&' : '?'}${p}`;
         };
 
-        const url = usePost ? dataSource : getUrl();
+        return { usePost, payload, url: usePost ? dataSource : getUrl() };
+    };
+
+    const showGridError = message => {
+        clearTimeout(loadingShowTimer);
+        Array.from(tbody.rows).forEach(row => {
+            row.style.filter = '';
+            row.style.opacity = '';
+        });
+        loadingBadge.classList.add('vgrid-loading-error');
+        loadingSpinner.hidden = true;
+        loadingText.textContent = `${message}.`;
+        loadingIndicator.setAttribute('aria-live', 'assertive');
+        loadingIndicator.hidden = false;
+        loadingIndicator.style.display = 'flex';
+        placeLoadingIndicator();
+    };
+
+    const fetchData = () => {
+        if (fetchAbort) fetchAbort.abort();
+        fetchAbort = new AbortController();
+
+        const { usePost, payload, url } = buildRequest();
+
+        showLoading();
+
         const fetchOpts = usePost
             ? { method: 'POST', headers: { 'Content-Type': 'application/json', ...requestHeaders(url) }, body: JSON.stringify(payload), signal: fetchAbort.signal }
             : { headers: requestHeaders(url), signal: fetchAbort.signal };
@@ -1426,18 +1599,7 @@ function vGrid(config) {
             })
             .catch(err => {
                 if (err.name === 'AbortError') return;
-                clearTimeout(loadingShowTimer);
-                Array.from(tbody.rows).forEach(row => {
-                    row.style.filter = '';
-                    row.style.opacity = '';
-                });
-                loadingBadge.classList.add('vgrid-loading-error');
-                loadingSpinner.hidden = true;
-                loadingText.textContent = `${err.message || 'The data could not be loaded'}.`;
-                loadingIndicator.setAttribute('aria-live', 'assertive');
-                loadingIndicator.hidden = false;
-                loadingIndicator.style.display = 'flex';
-                placeLoadingIndicator();
+                showGridError(err.message || 'The data could not be loaded');
                 console.error('vGrid fetch error:', err);
                 onReady?.({ error: err });
             });
@@ -1478,22 +1640,21 @@ function vGrid(config) {
         pagerEl.appendChild(btn('»', totalPages, currentPage === totalPages, false, 'Last page'));
     };
 
+    const activeFilterValues = () => filterInputs
+        .map(inp => ({ colIdx: parseInt(inp.dataset.col), val: inp.value.toLowerCase() }))
+        .filter(({ val }) => val);
+
+    const rowMatchesFilters = (tr, values) => values.every(({ colIdx, val }) => {
+        const cell = tr.cells[cellIndexOf(colIdx)];
+        return cell && cell.textContent.toLowerCase().includes(val);
+    });
+
     const render = () => {
         if (isRemote) { fetchData(); return; }
 
-        const filterVals = filterInputs.map(inp => ({
-            colIdx: parseInt(inp.dataset.col),
-            val:    inp.value.toLowerCase()
-        }));
-
+        const filterVals = activeFilterValues();
         const allRows = dataRows();
-        const filtered = allRows.filter(tr =>
-            filterVals.every(({ colIdx, val }) => {
-                if (!val) return true;
-                const cell = tr.cells[cellIndexOf(colIdx)];
-                return cell && cell.textContent.toLowerCase().includes(val);
-            })
-        );
+        const filtered = allRows.filter(tr => rowMatchesFilters(tr, filterVals));
 
         const ps = rowsPerPageSelects[0] ? parseInt(rowsPerPageSelects[0].value) : (rowsPerPage || 0);
         const totalPages = Math.max(1, ps ? Math.ceil(filtered.length / ps) : 1);
@@ -1517,6 +1678,182 @@ function vGrid(config) {
             infoEls.forEach(el => { el.textContent = `Showing ${from}–${to} of ${filtered.length}`; });
             pagerEls.forEach(el => renderPageButtons(el, totalPages));
             onPage?.({ page: currentPage, rowsPerPage: ps, total: filtered.length });
+        }
+    };
+
+    const downloadBaseName = () => `${namePrefix || 'vgrid'}-${new Date().toISOString().slice(0, 10)}`;
+
+    const saveBlob = (blob, name) => {
+        const href = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = href;
+        link.download = name;
+        link.style.display = 'none';
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(href), 1000);
+    };
+
+    const csvValue = value => {
+        const text = String(value ?? '').replace(/\s+/g, ' ').trim();
+        const formula = /^[=+@\t\r]/.test(text) || (text.startsWith('-') && !/^-?\d+(\.\d+)?$/.test(text));
+        const safe = formula ? `'${text}` : text;
+        return /[",]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
+    };
+
+    const downloadFromView = () => {
+        const values = activeFilterValues();
+        const rows = isRemote
+            ? dataRows().filter(tr => !tr.hidden)
+            : dataRows().filter(tr => rowMatchesFilters(tr, values));
+        const head = activeColumns.map(col => col.label || col.name);
+        const body = rows.map(tr => activeColumns.map((col, i) => tr.cells[cellIndexOf(i)]?.textContent ?? ''));
+        const csv = '\uFEFF' + [head, ...body].map(line => line.map(csvValue).join(',')).join('\r\n');
+        saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `${downloadBaseName()}.csv`);
+    };
+
+    const fileNameFromHeaders = response => {
+        const disposition = response.headers.get('content-disposition') || '';
+        const encoded = /filename\*\s*=\s*UTF-8''([^;]+)/i.exec(disposition);
+        if (encoded) {
+            try { return decodeURIComponent(encoded[1].trim()); } catch { }
+        }
+        const plain = /filename\s*=\s*"?([^";]+)"?/i.exec(disposition);
+        if (plain) return plain[1].trim();
+        const type = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase();
+        const extension = {
+            'text/csv': 'csv',
+            'text/tab-separated-values': 'tsv',
+            'text/plain': 'txt',
+            'text/html': 'html',
+            'text/xml': 'xml',
+            'application/xml': 'xml',
+            'application/json': 'json',
+            'application/pdf': 'pdf',
+            'application/zip': 'zip',
+            'application/gzip': 'gz',
+            'application/octet-stream': '',
+            'application/vnd.ms-excel': 'xls',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+            'application/vnd.oasis.opendocument.spreadsheet': 'ods'
+        }[type];
+        return extension ? `${downloadBaseName()}.${extension}` : downloadBaseName();
+    };
+
+    const downloadFromServer = () => {
+        const { usePost, payload, url } = buildRequest({ download: 'true' });
+        const fetchOpts = usePost
+            ? { method: 'POST', headers: { 'Content-Type': 'application/json', ...requestHeaders(url) }, body: JSON.stringify(payload) }
+            : { headers: requestHeaders(url) };
+        downloadButton.disabled = true;
+        fetch(url, fetchOpts)
+            .then(response => {
+                if (!response.ok) throw new Error(`The server answered ${response.status}${response.statusText ? ` ${response.statusText}` : ''}`);
+                return response.blob().then(blob => ({ blob, name: fileNameFromHeaders(response) }));
+            })
+            .then(({ blob, name }) => saveBlob(blob, name))
+            .catch(err => {
+                showGridError(err.message || 'The download could not be prepared');
+                console.error('vGrid download error:', err);
+            })
+            .finally(() => { downloadButton.disabled = false; });
+    };
+
+    const startDownload = () => {
+        if (downloadMode === 'server') downloadFromServer();
+        else downloadFromView();
+    };
+
+    const printStyles = `
+        html, body { margin: 0; padding: 0; background: #fff; color: #000; }
+        body { font: 12px/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+        table { width: 100%; border-collapse: collapse; }
+        thead { display: table-header-group; }
+        tfoot { display: table-footer-group; }
+        tr { page-break-inside: avoid; break-inside: avoid; }
+        th, td { border: 1px solid #999; padding: 4px 6px; text-align: left; vertical-align: top; font-size: 11px; word-break: break-word; }
+        th { background: #eee; font-weight: 600; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        th:first-child, td:first-child { width: 1%; white-space: nowrap; text-align: right; }
+        @page { margin: 12mm; }
+    `;
+
+    const buildPrintDocument = doc => {
+        doc.open();
+        doc.write('<!DOCTYPE html><html><head><meta charset="utf-8"></head><body></body></html>');
+        doc.close();
+        doc.title = downloadBaseName();
+
+        const style = doc.createElement('style');
+        style.textContent = printStyles;
+        doc.head.appendChild(style);
+
+        const table = doc.createElement('table');
+        const head = doc.createElement('thead');
+        const headRow = doc.createElement('tr');
+        const numberHead = doc.createElement('th');
+        numberHead.textContent = '#';
+        headRow.appendChild(numberHead);
+        activeColumns.forEach(col => {
+            const th = doc.createElement('th');
+            th.textContent = col.label || col.name;
+            headRow.appendChild(th);
+        });
+        head.appendChild(headRow);
+        table.appendChild(head);
+
+        const body = doc.createElement('tbody');
+        let printNumber = 1;
+        dataRows().filter(tr => !tr.hidden).forEach(tr => {
+            const row = doc.createElement('tr');
+            const numberCell = doc.createElement('td');
+            const gridNumber = rowNumbers ? (tr.cells[rowNumberCellIndex()]?.textContent ?? '').trim() : '';
+            numberCell.textContent = gridNumber || String(printNumber);
+            printNumber++;
+            row.appendChild(numberCell);
+            activeColumns.forEach((col, i) => {
+                const td = doc.createElement('td');
+                td.textContent = (tr.cells[cellIndexOf(i)]?.textContent ?? '').replace(/\s+/g, ' ').trim();
+                row.appendChild(td);
+            });
+            body.appendChild(row);
+        });
+        table.appendChild(body);
+        doc.body.appendChild(table);
+    };
+
+    const startPrint = () => {
+        const frame = document.createElement('iframe');
+        frame.setAttribute('aria-hidden', 'true');
+        frame.setAttribute('tabindex', '-1');
+        frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+        document.body.appendChild(frame);
+
+        const view = frame.contentWindow;
+        if (!view) {
+            frame.remove();
+            showGridError('The print view could not be prepared');
+            return;
+        }
+
+        let removed = false;
+        const cleanUp = () => {
+            if (removed) return;
+            removed = true;
+            clearTimeout(fallback);
+            frame.remove();
+        };
+        const fallback = setTimeout(cleanUp, 60000);
+
+        try {
+            buildPrintDocument(frame.contentDocument);
+            view.addEventListener('afterprint', () => setTimeout(cleanUp, 0), { once: true });
+            view.focus();
+            view.print();
+        } catch (err) {
+            cleanUp();
+            showGridError('The print view could not be prepared');
+            console.error('vGrid print error:', err);
         }
     };
 
@@ -1700,6 +2037,7 @@ function vGrid(config) {
     element.addEventListener('lostpointercapture', finishColumnResize, { capture: true, signal });
 
     externalFilterInputs.forEach(({ element }) => element.addEventListener('change', () => {
+        if (resettingFilters) return;
         currentPage = 1;
         render();
     }, { signal }));
@@ -1797,6 +2135,9 @@ function vGrid(config) {
             settingsPanel.remove();
             settingsButton?.remove();
             refreshButton?.remove();
+            clearFiltersButton?.remove();
+            downloadButton?.remove();
+            printButton?.remove();
             if (createdTable) gridWrapper.remove();
             else {
                 gridWrapper.replaceWith(element);
