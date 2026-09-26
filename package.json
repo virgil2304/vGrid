@@ -1,0 +1,106 @@
+{
+  "name": "vgrid",
+  "version": "1.0.0",
+  "description": "Virgil's Grid (vGrid): a zero-dependency JavaScript data grid for the browser, React, and Vue.",
+  "license": "MIT",
+  "homepage": "https://github.com/virgil2304/vGrid#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/virgil2304/vGrid.git"
+  },
+  "bugs": {
+    "url": "https://github.com/virgil2304/vGrid/issues"
+  },
+  "keywords": [
+    "vgrid",
+    "virgils-grid",
+    "grid",
+    "data-grid",
+    "datagrid",
+    "table",
+    "javascript",
+    "react",
+    "vue",
+    "typescript"
+  ],
+  "type": "module",
+  "main": "./src/vgrid.js",
+  "module": "./src/vgrid.js",
+  "types": "./types/index.d.ts",
+  "unpkg": "./dist/vgrid.min.js",
+  "jsdelivr": "./dist/vgrid.min.js",
+  "exports": {
+    ".": {
+      "types": "./types/index.d.ts",
+      "import": "./src/vgrid.js",
+      "default": "./src/vgrid.js"
+    },
+    "./style.css": {
+      "types": "./types/style.d.ts",
+      "default": "./src/vgrid.css"
+    },
+    "./react": {
+      "types": "./types/react.d.ts",
+      "default": "./integrations/react.js"
+    },
+    "./vue": {
+      "types": "./types/vue.d.ts",
+      "default": "./integrations/vue.js"
+    },
+    "./browser": {
+      "types": "./types/browser.d.ts",
+      "default": "./integrations/browser.js"
+    },
+    "./browser/style.css": {
+      "types": "./types/style.d.ts",
+      "default": "./dist/vgrid.css"
+    },
+    "./dist/vgrid.css": {
+      "types": "./types/style.d.ts",
+      "default": "./dist/vgrid.css"
+    },
+    "./dist/vgrid.min.css": {
+      "types": "./types/style.d.ts",
+      "default": "./dist/vgrid.min.css"
+    },
+    "./dist/*": "./dist/*",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src/",
+    "integrations/",
+    "types/",
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": [
+    "**/*.css",
+    "./integrations/browser.js",
+    "./dist/*.js"
+  ],
+  "peerDependencies": {
+    "@types/react": "^18.0.0 || ^19.0.0",
+    "react": "^18.0.0 || ^19.0.0",
+    "vue": "^3.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@types/react": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    },
+    "vue": {
+      "optional": true
+    }
+  },
+  "scripts": {
+    "build:dist": "npm run build:browser && npm run build:css",
+    "build:browser": "esbuild src/vgrid.js --bundle --format=iife --global-name=vGridPackage --footer:js=\"globalThis.vGrid = vGridPackage.vGrid\" --sourcemap --outfile=dist/vgrid.js && esbuild dist/vgrid.js --minify --banner:js=\"/* vGrid */\" --sourcemap --outfile=dist/vgrid.min.js",
+    "build:css": "esbuild src/vgrid.css --outfile=dist/vgrid.css && esbuild src/vgrid.css --minify --banner:css=\"/* vGrid */\" --sourcemap --outfile=dist/vgrid.min.css"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}
