@@ -4,6 +4,8 @@
 
 The npm package identifier is `vgrid`. The JavaScript API is `vGrid(config)`; the React and Vue components use `vGrid` as both their named and default export.
 
+Read the [web documentation](https://grid.virgils.org/documentation).
+
 ## Install
 
 After publishing the package to npm:
