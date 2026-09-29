@@ -3,14 +3,7 @@
 import { createElement, useEffect, useRef } from 'react';
 import { vGrid as createGrid } from '../src/vgrid.js';
 
-/**
- * Virgil's Grid (vGrid) React adapter.
- * Mounts vGrid inside a React-owned host element.
- * Pass a stable config object; replacing it rebuilds the grid.
- *
- * Import with `import * as grids from 'vgrid/react'` and render <grids.vGrid />.
- */
-export function vGrid({ config, ...hostAttributes }) {
+export function VGRID({ config, ...hostAttributes }) {
     const host = useRef(null);
 
     useEffect(() => {
@@ -21,4 +14,5 @@ export function vGrid({ config, ...hostAttributes }) {
     return createElement('div', { ...hostAttributes, ref: host });
 }
 
-export default vGrid;
+export { VGRID as vGrid };
+export default VGRID;

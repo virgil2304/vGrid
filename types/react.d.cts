@@ -7,7 +7,6 @@ export type VGRIDProps<Row extends object = object> =
     };
 export type vGridProps<Row extends object = object> = VGRIDProps<Row>;
 
-/** React component. Use `import { VGRID } from 'vgrid/react'` and <VGRID config={...} />. */
 export declare function VGRID<Row extends object = object>(props: VGRIDProps<Row>): ReactElement;
 export { VGRID as vGrid };
 export default VGRID;

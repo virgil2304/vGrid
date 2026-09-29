@@ -1,13 +1,9 @@
-import { defineComponent, h, onBeforeUnmount, onMounted, ref, watch } from 'vue';
-import { vGrid as createGrid } from '../src/vgrid.js';
+'use strict';
 
-/**
- * vGrid Vue adapter.
- * Mounts vGrid inside a Vue-owned host element.
- * Pass a stable config object; replacing it rebuilds the grid.
- * Render in templates with <component :is="vGrid" :config="config" />.
- */
-export const vGrid = defineComponent({
+const { defineComponent, h, onBeforeUnmount, onMounted, ref, watch } = require('vue');
+const { vGrid: createGrid } = require('../dist/vgrid.cjs');
+
+const vGrid = defineComponent({
     name: 'vGrid',
     inheritAttrs: false,
     props: {
@@ -35,4 +31,6 @@ export const vGrid = defineComponent({
     },
 });
 
-export default vGrid;
+module.exports = vGrid;
+module.exports.vGrid = vGrid;
+module.exports.default = vGrid;

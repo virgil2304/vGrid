@@ -1,6 +1,6 @@
 {
   "name": "vgrid",
-  "version": "1.0.0",
+  "version": "1.0.541",
   "description": "Virgil's Grid (vGrid): a zero-dependency JavaScript data grid for the browser, React, and Vue.",
   "license": "MIT",
   "homepage": "https://github.com/virgil2304/vGrid#readme",
@@ -24,15 +24,21 @@
     "typescript"
   ],
   "type": "module",
-  "main": "./src/vgrid.js",
+  "main": "./dist/vgrid.cjs",
   "module": "./src/vgrid.js",
   "types": "./types/index.d.ts",
   "unpkg": "./dist/vgrid.min.js",
   "jsdelivr": "./dist/vgrid.min.js",
   "exports": {
     ".": {
-      "types": "./types/index.d.ts",
-      "import": "./src/vgrid.js",
+      "import": {
+        "types": "./types/index.d.ts",
+        "default": "./src/vgrid.js"
+      },
+      "require": {
+        "types": "./types/index.d.cts",
+        "default": "./dist/vgrid.cjs"
+      },
       "default": "./src/vgrid.js"
     },
     "./style.css": {
@@ -40,15 +46,36 @@
       "default": "./src/vgrid.css"
     },
     "./react": {
-      "types": "./types/react.d.ts",
+      "import": {
+        "types": "./types/react.d.ts",
+        "default": "./integrations/react.js"
+      },
+      "require": {
+        "types": "./types/react.d.cts",
+        "default": "./integrations/react.cjs"
+      },
       "default": "./integrations/react.js"
     },
     "./vue": {
-      "types": "./types/vue.d.ts",
+      "import": {
+        "types": "./types/vue.d.ts",
+        "default": "./integrations/vue.js"
+      },
+      "require": {
+        "types": "./types/vue.d.cts",
+        "default": "./integrations/vue.cjs"
+      },
       "default": "./integrations/vue.js"
     },
     "./browser": {
-      "types": "./types/browser.d.ts",
+      "import": {
+        "types": "./types/browser.d.ts",
+        "default": "./integrations/browser.js"
+      },
+      "require": {
+        "types": "./types/browser.d.cts",
+        "default": "./integrations/browser.cjs"
+      },
       "default": "./integrations/browser.js"
     },
     "./browser/style.css": {
@@ -77,6 +104,7 @@
   "sideEffects": [
     "**/*.css",
     "./integrations/browser.js",
+    "./integrations/browser.cjs",
     "./dist/*.js"
   ],
   "peerDependencies": {
@@ -94,13 +122,5 @@
     "vue": {
       "optional": true
     }
-  },
-  "scripts": {
-    "build:dist": "npm run build:browser && npm run build:css",
-    "build:browser": "esbuild src/vgrid.js --bundle --format=iife --global-name=vGridPackage --footer:js=\"globalThis.vGrid = vGridPackage.vGrid\" --sourcemap --outfile=dist/vgrid.js && esbuild dist/vgrid.js --minify --banner:js=\"/* vGrid */\" --sourcemap --outfile=dist/vgrid.min.js",
-    "build:css": "esbuild src/vgrid.css --outfile=dist/vgrid.css && esbuild src/vgrid.css --minify --banner:css=\"/* vGrid */\" --sourcemap --outfile=dist/vgrid.min.css"
-  },
-  "devDependencies": {
-    "esbuild": "^0.28.2"
   }
 }

@@ -1,4 +1,4 @@
-/* vGrid v1.0.0.5.40 | Last updated: 2026-09-25 */
+/* vGrid v1.0.0.5.41 | Last updated: 2026-09-29 */
 function vGrid(config) {
 
     const { el, caption, columns = [], data = [], dataSource, method = 'GET', headers = {},
@@ -14,7 +14,11 @@ function vGrid(config) {
         const size = parseInt(value);
         return Number.isFinite(size) && size > 0 ? size : null;
     };
-    const rowsPerPageDefault = showPagination || showRowsPerPage || externalPagination || externalRowsPerPage ? 10 : 0;
+    const toCount = value => {
+        const number = typeof value === 'string' && value.trim() !== '' ? Number(value) : value;
+        return typeof number === 'number' && Number.isFinite(number) ? number : null;
+    };
+    const rowsPerPageDefault = externalPagination || externalRowsPerPage ? 10 : 0;
     const rowsPerPage = toPageSize(rowsPerPageConfig === undefined ? rowsPerPageDefault : rowsPerPageConfig) ?? undefined;
     const normalisedPageSizes = Array.isArray(rowsPerPageOptionsConfig)
         ? [...new Set(rowsPerPageOptionsConfig.map(toPageSize).filter(size => size !== null))]
@@ -281,6 +285,7 @@ function vGrid(config) {
     if (externalRowsPerPage && !externalRowsPerPageElement) {
         console.error('vGrid: external rows-per-page control was not found.');
     }
+    let pageSizeSource = externalRowsPerPageElement ? 'external' : 'grid';
 
     const resolveExternal = selector => typeof selector === 'string' ? document.querySelector(selector) : selector;
     const externalPaginationElements = resolveExternalAll(externalPagination);
@@ -411,7 +416,19 @@ function vGrid(config) {
             return col;
         }));
     };
-    const updateColSpans = () => colSpanCells.forEach(cell => { cell.colSpan = totalCols; });
+    const pruneColSpanCells = () => {
+        for (let i = colSpanCells.length - 1; i >= 0; i--) {
+            if (!colSpanCells[i].parentNode?.parentNode) colSpanCells.splice(i, 1);
+        }
+    };
+    const trackColSpan = cell => {
+        pruneColSpanCells();
+        colSpanCells.push(cell);
+    };
+    const updateColSpans = () => {
+        pruneColSpanCells();
+        colSpanCells.forEach(cell => { cell.colSpan = totalCols; });
+    };
     buildColgroup();
     const clipCell = cell => {
         cell.style.overflow = 'hidden';
@@ -587,7 +604,7 @@ function vGrid(config) {
         if (caption) td.innerHTML = caption;
         if (captionActions) td.insertBefore(makeActions(), td.firstChild);
         tr.appendChild(td);
-        colSpanCells.push(td);
+        trackColSpan(td);
         thead.appendChild(tr);
     }
 
@@ -612,9 +629,32 @@ function vGrid(config) {
             rowsPerPage,
         ])].filter(size => Number.isFinite(size)).sort((a, b) => a - b);
 
+    const currentPageSize = () => {
+        const external = pageSizeSource === 'external' && externalRowsPerPageElement ? toPageSize(externalRowsPerPageElement.value) : null;
+        if (external) return external;
+        return rowsPerPageSelects[0] ? parseInt(rowsPerPageSelects[0].value) : (rowsPerPage || 0);
+    };
+
+    const setSelectValue = (select, size) => {
+        const value = String(size);
+        if (!select.options) { select.value = value; return; }
+        if (![...select.options].some(option => option.value === value)) {
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = size;
+            select.insertBefore(opt, [...select.options].find(option => parseInt(option.value) > size) || null);
+        }
+        select.value = value;
+    };
+
+    const syncPageSizeControls = size => {
+        if (!toPageSize(size)) return;
+        rowsPerPageSelects.forEach(select => setSelectValue(select, size));
+        externalRowsPerPageElements.forEach(select => setSelectValue(select, size));
+    };
+
     const updatePageSizeOptions = total => {
-        if (rowsPerPageOptions) return;
-        const selected = rowsPerPageSelects[0] ? parseInt(rowsPerPageSelects[0].value) : rowsPerPage;
+        const selected = currentPageSize() || rowsPerPage;
         const sizes = [...new Set([...pageSizeOptions(total), selected])].filter(size => Number.isFinite(size)).sort((a, b) => a - b);
         rowsPerPageSelects.forEach(select => {
             select.replaceChildren(...sizes.map(s => {
@@ -625,6 +665,7 @@ function vGrid(config) {
             }));
             select.value = String(selected);
         });
+        externalRowsPerPageElements.forEach(select => setSelectValue(select, selected));
     };
 
     const makeBar = () => {
@@ -666,7 +707,7 @@ function vGrid(config) {
 
         td.append(left, document.createTextNode(' '), center, document.createTextNode(' '), right);
         tr.appendChild(td);
-        colSpanCells.push(td);
+        trackColSpan(td);
         return tr;
     };
 
@@ -1023,7 +1064,7 @@ function vGrid(config) {
                 dataSource: panelUrl(panel, value, false),
                 method: panel.method || 'GET',
                 headers: panel.headers || {},
-                rowsPerPage: panel.rowsPerPage || 10,
+                rowsPerPage: panel.rowsPerPage ?? 10,
                 rowNumbers: panel.rowNumbers ?? rowNumbers,
                 rowNumbersType: panel.rowNumbersType || rowNumbersType,
                 externalFilters: panel.externalFilters || {},
@@ -1040,6 +1081,10 @@ function vGrid(config) {
                     ready();
                 },
             });
+            if (!entry.instance) {
+                content.replaceChildren(panelNotice('error', `${panelLabel(panel)} could not be loaded: the panel grid configuration is invalid.`));
+                ready();
+            }
             return;
         }
         content.replaceChildren(panelNotice('loading', 'Loading\u2026'));
@@ -1309,7 +1354,7 @@ function vGrid(config) {
         });
     };
 
-    const dataRows = () => Array.from(tbody.rows).filter(tr => !tr.dataset.vgridSubgrid && !tr.dataset.vgridEmpty);
+    const dataRows = () => Array.from(tbody.rows).filter(tr => !tr.dataset.vgridSubgrid && !tr.dataset.vgridEmpty && !tr.dataset.vgridLoadingSpace);
 
     const emptyRow = () => {
         const tr = document.createElement('tr');
@@ -1319,7 +1364,7 @@ function vGrid(config) {
         td.colSpan = totalCols;
         td.textContent = 'No records to show.';
         tr.appendChild(td);
-        colSpanCells.push(td);
+        trackColSpan(td);
         return tr;
     };
 
@@ -1398,7 +1443,7 @@ function vGrid(config) {
         const td = document.createElement('td');
         td.colSpan = totalCols;
         tr.appendChild(td);
-        colSpanCells.push(td);
+        trackColSpan(td);
         return tr;
     };
 
@@ -1453,7 +1498,7 @@ function vGrid(config) {
         td.colSpan = totalCols;
         td.appendChild(makeActions());
         tr.appendChild(td);
-        colSpanCells.push(td);
+        trackColSpan(td);
         tfoot.appendChild(tr);
     }
 
@@ -1498,12 +1543,8 @@ function vGrid(config) {
     let suppressHeaderClick = false;
     const MIN_COLUMN_WIDTH = 40;
     const EDGE_TOLERANCE = 6;
-    let pageSizeSource = externalRowsPerPageElement ? 'external' : 'grid';
-
     const buildRequest = (extra = {}) => {
-        const ps      = pageSizeSource === 'external' && externalRowsPerPageElement
-            ? parseInt(externalRowsPerPageElement.value)
-            : (rowsPerPageSelects[0] ? parseInt(rowsPerPageSelects[0].value) : (rowsPerPage || 0));
+        const ps      = currentPageSize();
         const usePost = method.toUpperCase() === 'POST';
 
         const filter = {};
@@ -1573,9 +1614,9 @@ function vGrid(config) {
                 const { data: rows, total, page: pg, limit: ps2, summary } = body;
                 if (rows === undefined) throw new Error('The response has no "data" field');
                 if (!Array.isArray(rows)) throw new Error('The "data" field is not an array');
-                const totalRows = Number.isFinite(total) ? total : rows.length;
-                const pageSize  = Number.isFinite(ps2) && ps2 > 0 ? ps2 : null;
-                const pageNo    = Number.isFinite(pg) && pg > 0 ? pg : currentPage;
+                const totalRows = toCount(total) ?? rows.length;
+                const pageSize  = toCount(ps2) > 0 ? toCount(ps2) : null;
+                const pageNo    = toCount(pg) > 0 ? toCount(pg) : currentPage;
                 currentPage = pageNo;
                 buildRows(rows, pageSize ? (pageNo - 1) * pageSize : 0);
                 hideLoading();
@@ -1641,12 +1682,20 @@ function vGrid(config) {
     };
 
     const activeFilterValues = () => filterInputs
-        .map(inp => ({ colIdx: parseInt(inp.dataset.col), val: inp.value.toLowerCase() }))
+        .map(inp => {
+            const colIdx = parseInt(inp.dataset.col);
+            const val = inp.value.toLowerCase();
+            if (inp.tagName !== 'SELECT') return { colIdx, val };
+            const label = String(inp.options[inp.selectedIndex]?.textContent ?? '').trim().toLowerCase();
+            return { colIdx, val, exact: [...new Set([val.trim(), label])].filter(Boolean) };
+        })
         .filter(({ val }) => val);
 
-    const rowMatchesFilters = (tr, values) => values.every(({ colIdx, val }) => {
+    const rowMatchesFilters = (tr, values) => values.every(({ colIdx, val, exact }) => {
         const cell = tr.cells[cellIndexOf(colIdx)];
-        return cell && cell.textContent.toLowerCase().includes(val);
+        if (!cell) return false;
+        const text = cell.textContent.toLowerCase();
+        return exact ? exact.includes(text.trim()) : text.includes(val);
     });
 
     const render = () => {
@@ -1656,7 +1705,7 @@ function vGrid(config) {
         const allRows = dataRows();
         const filtered = allRows.filter(tr => rowMatchesFilters(tr, filterVals));
 
-        const ps = rowsPerPageSelects[0] ? parseInt(rowsPerPageSelects[0].value) : (rowsPerPage || 0);
+        const ps = currentPageSize();
         const totalPages = Math.max(1, ps ? Math.ceil(filtered.length / ps) : 1);
         if (currentPage > totalPages) currentPage = totalPages;
         if (currentPage < 1) currentPage = 1;
@@ -1932,6 +1981,7 @@ function vGrid(config) {
         buildRows(localData);
         if (sortColIndex !== null && sortColIndex !== -1) applySort();
         else render();
+        freezeColumns();
     };
 
     const applyColumnWidths = widths => {
@@ -2043,8 +2093,8 @@ function vGrid(config) {
     }, { signal }));
 
     externalRowsPerPageElements.forEach(select => select.addEventListener('change', () => {
-        externalRowsPerPageElements.forEach(other => { other.value = select.value; });
         pageSizeSource = 'external';
+        syncPageSizeControls(parseInt(select.value));
         currentPage = 1;
         render();
     }, { signal }));
@@ -2070,8 +2120,8 @@ function vGrid(config) {
     }
 
     rowsPerPageSelects.forEach(select => select.addEventListener('change', () => {
-        rowsPerPageSelects.forEach(other => { other.value = select.value; });
         pageSizeSource = 'grid';
+        syncPageSizeControls(parseInt(select.value));
         currentPage = 1;
         render();
     }, { signal }));
