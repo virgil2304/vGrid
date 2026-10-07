@@ -1,4 +1,4 @@
-/* vGrid v1.0.0.5.41 | Last updated: 2026-09-29 */
+/* vGrid v1.0.0.5.42 | Last updated: 2026-10-07 */
 function vGrid(config) {
 
     const { el, caption, columns = [], data = [], dataSource, method = 'GET', headers = {},
@@ -7,7 +7,7 @@ function vGrid(config) {
         showPagination = showPaginationControls, showRowsPerPage = showPaginationControls,
         externalFilters = {}, externalRowsPerPage, externalPagination, externalSort = {}, externalSummary = {},
         settings = true, externalSettings, subgrid, borders = 'horizontal', size = 'medium', actions = 'caption', easing = 160,
-        download = false, print = true,
+        download = false, print = true, autoDestroy = false,
         onSort, onFilter, onPage, onReady, namespace } = config;
 
     const toPageSize = value => {
@@ -99,6 +99,10 @@ function vGrid(config) {
 
     if (print !== true && print !== false) {
         console.error('vGrid: print must be true or false.');
+    }
+
+    if (autoDestroy !== true && autoDestroy !== false) {
+        console.error('vGrid: autoDestroy must be true or false.');
     }
 
     const resolveAction = (name, fallbackActive) => {
@@ -208,6 +212,7 @@ function vGrid(config) {
             entries: new Map(),
             menu: document.createElement('div'),
             menuOwner: null,
+            menuRow: null,
             menuClosedAt: 0,
             order: 0,
         };
@@ -236,6 +241,10 @@ function vGrid(config) {
         return null;
     }
     let localData = data;
+    let currentRows = [];
+    let currentOffset = 0;
+    const rowData = new WeakMap();
+    const panelOwners = new WeakMap();
 
     const isRemote = !!dataSource;
 
@@ -388,13 +397,6 @@ function vGrid(config) {
             .forEach(({ sub, at }) => cells.splice(Math.min(Math.max(at, 0), cells.length), 0, makeCell(sub)));
         return cells;
     };
-    const shiftCellIndex = base => {
-        let cell = base;
-        toggleIndexesSorted.forEach(at => { if (at <= cell) cell++; });
-        return cell;
-    };
-    const cellIndexOf = index => shiftCellIndex(index + (rowNumbers ? 1 : 0));
-    const rowNumberCellIndex = () => shiftCellIndex(0);
     const columnAtCell = index => {
         if (toggleIndexesSorted.includes(index)) return null;
         let position = index - toggleIndexesSorted.filter(at => at < index).length - (rowNumbers ? 1 : 0);
@@ -612,10 +614,20 @@ function vGrid(config) {
 
     const infoEls = [], pagerEls = [], rowsPerPageSelects = [];
 
+    const bindPager = pager => {
+        pager.addEventListener('click', event => {
+            const button = event.target.closest('button[data-vgrid-page]');
+            if (!button || button.disabled) return;
+            currentPage = parseInt(button.dataset.vgridPage);
+            render();
+        }, { signal });
+        return pager;
+    };
+
     externalPaginationElements.forEach(container => {
         const info = document.createElement('span');
         info.className = partClass('count');
-        const pager = document.createElement('span');
+        const pager = bindPager(document.createElement('span'));
         pager.className = partClass('pager');
         container.replaceChildren(info, document.createTextNode(' '), pager);
         infoEls.push(info);
@@ -675,7 +687,7 @@ function vGrid(config) {
         td.colSpan = totalCols;
         const left = document.createElement('span');
         left.className = partClass('count');
-        const center = document.createElement('span');
+        const center = bindPager(document.createElement('span'));
         center.className = partClass('pager');
         const right = document.createElement('span');
         right.className = partClass('rows-per-page');
@@ -736,20 +748,7 @@ function vGrid(config) {
             if (col.width) th.width = String(col.width);
             if (col.sort !== false) {
                 th.title = `Sort by ${th.textContent}`;
-                th.addEventListener('click', () => {
-                    if (suppressHeaderClick) {
-                        suppressHeaderClick = false;
-                        return;
-                    }
-                    if (sortColIndex === i) {
-                        sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
-                    } else {
-                        sortColIndex = i;
-                        sortOrder = 'asc';
-                    }
-                    currentPage = 1;
-                    applySort();
-                }, { signal });
+                th.dataset.vgridSort = String(i);
             }
             cells.push(clipCell(th));
             columnHeaders.push(th);
@@ -767,6 +766,23 @@ function vGrid(config) {
     };
 
     buildHeaderRow();
+    headerRow.addEventListener('click', event => {
+        const th = event.target.closest('th[data-vgrid-sort]');
+        if (!th || th.parentNode !== headerRow) return;
+        if (suppressHeaderClick) {
+            suppressHeaderClick = false;
+            return;
+        }
+        const i = parseInt(th.dataset.vgridSort);
+        if (sortColIndex === i) {
+            sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+        } else {
+            sortColIndex = i;
+            sortOrder = 'asc';
+        }
+        currentPage = 1;
+        applySort();
+    }, { signal });
     thead.appendChild(headerRow);
 
     const filterInputs = [];
@@ -842,16 +858,7 @@ function vGrid(config) {
         button.style.color = 'inherit';
         button.style.opacity = '.6';
         button.style.cursor = 'pointer';
-        button.addEventListener('click', () => clearFilterInput(control), { signal });
-        button.addEventListener('mouseenter', () => { button.style.opacity = '1'; }, { signal });
-        button.addEventListener('mouseleave', () => { button.style.opacity = '.6'; }, { signal });
-        if (!isSelect) {
-            control.addEventListener('keydown', event => {
-                if (event.key !== 'Escape' || control.value === '') return;
-                event.preventDefault();
-                clearFilterInput(control);
-            }, { signal });
-        }
+        button.dataset.vgridFilterClear = '1';
         wrap.append(control, button);
         filterClears.push({ control, button, pad: isSelect ? '2.4em' : '1.2em' });
         return wrap;
@@ -901,7 +908,18 @@ function vGrid(config) {
         });
         if (hasPanels) placeToggleCells(cells, () => clipCell(document.createElement('td')));
         filterRowElement.replaceChildren(...cells);
-        filterInputs.forEach(inp => inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input', () => {
+        syncFilterClears();
+    };
+
+    buildFilterRow();
+    if (filterRowElement) {
+        const filterControlOf = target => {
+            const control = target.closest('input, select');
+            return control && filterInputs.includes(control) ? control : null;
+        };
+        const onFilterInput = event => {
+            const control = filterControlOf(event.target);
+            if (!control || event.type !== (control.tagName === 'SELECT' ? 'change' : 'input')) return;
             syncFilterClears();
             currentPage = 1;
             if (isRemote) {
@@ -911,12 +929,32 @@ function vGrid(config) {
                 onFilter?.({ filters: filterInputs.map(i => ({ column: activeColumns[parseInt(i.dataset.col)]?.name, value: i.value })) });
                 render();
             }
-        }, { signal }));
-        syncFilterClears();
-    };
-
-    buildFilterRow();
-    if (filterRowElement) thead.appendChild(filterRowElement);
+        };
+        filterRowElement.addEventListener('input', onFilterInput, { signal });
+        filterRowElement.addEventListener('change', onFilterInput, { signal });
+        filterRowElement.addEventListener('keydown', event => {
+            if (event.key !== 'Escape') return;
+            const control = filterControlOf(event.target);
+            if (!control || control.tagName === 'SELECT' || control.value === '') return;
+            if (!filterClears.some(entry => entry.control === control)) return;
+            event.preventDefault();
+            clearFilterInput(control);
+        }, { signal });
+        filterRowElement.addEventListener('click', event => {
+            const button = event.target.closest('[data-vgrid-filter-clear]');
+            const control = button && filterClears.find(entry => entry.button === button)?.control;
+            if (control) clearFilterInput(control);
+        }, { signal });
+        filterRowElement.addEventListener('mouseover', event => {
+            const button = event.target.closest('[data-vgrid-filter-clear]');
+            if (button) button.style.opacity = '1';
+        }, { signal });
+        filterRowElement.addEventListener('mouseout', event => {
+            const button = event.target.closest('[data-vgrid-filter-clear]');
+            if (button) button.style.opacity = '.6';
+        }, { signal });
+        thead.appendChild(filterRowElement);
+    }
 
     const tbody = document.createElement('tbody');
     let loadingIndicator, loadingBadge, loadingSpinner, loadingText, loadingShowTimer;
@@ -979,6 +1017,7 @@ function vGrid(config) {
         const node = markupNode();
         if (node) {
             node.classList.add(...toggleClasses);
+            node.dataset.vgridToggle = String(sub.order);
             if (opensMenu) {
                 node.dataset.vgridMenu = '1';
                 node.setAttribute('aria-haspopup', 'menu');
@@ -988,6 +1027,7 @@ function vGrid(config) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = toggleClasses.join(' ');
+        button.dataset.vgridToggle = String(sub.order);
         if (opensMenu) {
             button.dataset.vgridMenu = '1';
             button.setAttribute('aria-haspopup', 'menu');
@@ -1031,6 +1071,8 @@ function vGrid(config) {
     const fillPanel = (body, panel, row, entry) => {
         entry.instance?.destroy();
         entry.instance = null;
+        entry.fetchAbort?.abort();
+        entry.fetchAbort = null;
         const token = entry.token = (entry.token || 0) + 1;
         entry.ready = false;
         const ready = () => {
@@ -1089,7 +1131,8 @@ function vGrid(config) {
         }
         content.replaceChildren(panelNotice('loading', 'Loading\u2026'));
         const url = panelUrl(panel, value);
-        fetch(url, { signal, method: panel.method || 'GET', headers: requestHeaders(url, panel.headers) })
+        const fetchAbort = entry.fetchAbort = new AbortController();
+        fetch(url, { signal: fetchAbort.signal, method: panel.method || 'GET', headers: requestHeaders(url, panel.headers) })
             .then(response => { if (!response.ok) throw new Error(String(response.status)); return response.text(); })
             .then(text => {
                 if (!content.isConnected || entry.token !== token) return;
@@ -1133,6 +1176,8 @@ function vGrid(config) {
         entry.observer = null;
         entry.instance?.destroy();
         entry.instance = null;
+        entry.fetchAbort?.abort();
+        entry.fetchAbort = null;
         entry.panelRow.remove();
     };
 
@@ -1144,6 +1189,8 @@ function vGrid(config) {
         entry.state = 'closing';
         entry.observer?.disconnect();
         entry.observer = null;
+        entry.fetchAbort?.abort();
+        entry.fetchAbort = null;
         entry.token = (entry.token || 0) + 1;
         const current = entry.slide.offsetHeight;
         if (!entry.panelRow.isConnected || !current) {
@@ -1195,9 +1242,10 @@ function vGrid(config) {
         close.textContent = '\u00D7';
         close.title = 'Close';
         close.setAttribute('aria-label', 'Close');
-        close.addEventListener('click', () => closePanel(sub, tr), { signal });
-        const entry = { panelRow, toggle, body, slide, clip, close, state: 'opening', ready: false, observer: null, instance: null, panel: null };
+        close.dataset.vgridClose = '1';
+        const entry = { panelRow, toggle, body, slide, clip, close, state: 'opening', ready: false, observer: null, instance: null, fetchAbort: null, panel: null };
         sub.entries.set(tr, entry);
+        panelOwners.set(panelRow, { sub, tr });
         clip.appendChild(body);
         slide.appendChild(clip);
         cell.appendChild(slide);
@@ -1295,22 +1343,17 @@ function vGrid(config) {
         available.forEach(panel => {
             const current = entry?.panel === panel;
             const item = panelMenuItem(panelLabel(panel), current);
-            item.addEventListener('click', () => {
-                hidePanelMenus();
-                selectPanel(sub, tr, row, toggle, panel);
-            }, { signal });
+            item.dataset.vgridMenuItem = String(sub.panels.indexOf(panel));
             if (current || (!focusItem && !entry && panel === sub.defaultPanel)) focusItem = item;
             sub.menu.appendChild(item);
         });
         if (entry) {
             const hide = panelMenuItem('Hide', false, false);
-            hide.addEventListener('click', () => {
-                hidePanelMenus();
-                closePanel(sub, tr);
-            }, { signal });
+            hide.dataset.vgridMenuItem = 'hide';
             sub.menu.appendChild(hide);
         }
         sub.menuOwner = toggle;
+        sub.menuRow = tr;
         sub.menu.style.maxHeight = '';
         sub.menu.showPopover();
         resizePanelMenu(sub);
@@ -1323,6 +1366,16 @@ function vGrid(config) {
         sub.menu.className = partClass('panel-menu', partClass(`panel-menu-${sub.order + 1}`));
         sub.menu.addEventListener('toggle', event => {
             if (event.newState === 'closed') sub.menuClosedAt = Date.now();
+        }, { signal });
+        sub.menu.addEventListener('click', event => {
+            const item = event.target.closest('[data-vgrid-menu-item]');
+            if (!item) return;
+            hidePanelMenus();
+            const tr = sub.menuRow;
+            if (!tr?.isConnected) return;
+            if (item.dataset.vgridMenuItem === 'hide') { closePanel(sub, tr); return; }
+            const panel = sub.panels[parseInt(item.dataset.vgridMenuItem)];
+            if (panel) selectPanel(sub, tr, rowData.get(tr), sub.menuOwner, panel);
         }, { signal });
         window.addEventListener('resize', () => resizePanelMenu(sub), { signal });
         window.addEventListener('scroll', event => {
@@ -1349,12 +1402,69 @@ function vGrid(config) {
                 entry.observer?.disconnect();
                 entry.observer = null;
                 entry.instance?.destroy();
+                entry.instance = null;
+                entry.fetchAbort?.abort();
+                entry.fetchAbort = null;
             });
             sub.entries.clear();
+            sub.menuOwner = null;
+            sub.menuRow = null;
+            sub.menu.replaceChildren();
         });
     };
 
-    const dataRows = () => Array.from(tbody.rows).filter(tr => !tr.dataset.vgridSubgrid && !tr.dataset.vgridEmpty && !tr.dataset.vgridLoadingSpace);
+    const rowOf = node => {
+        const tr = node?.closest('tr');
+        return tr && tr.parentNode === tbody ? tr : null;
+    };
+
+    if (hasPanels) {
+        tbody.addEventListener('click', event => {
+            const close = event.target.closest('[data-vgrid-close]');
+            if (close) {
+                const owner = panelOwners.get(rowOf(close));
+                if (owner) closePanel(owner.sub, owner.tr);
+                return;
+            }
+            const toggle = event.target.closest('[data-vgrid-toggle]');
+            const tr = toggle && rowOf(toggle);
+            if (!tr) return;
+            const sub = subgrids[parseInt(toggle.dataset.vgridToggle)];
+            const row = rowData.get(tr);
+            if (!sub || !row) return;
+            if (sub.menuOwner === toggle && sub.menu.matches(':popover-open')) { hidePanelMenus(); return; }
+            if (sub.menuOwner === toggle && Date.now() - sub.menuClosedAt < 200) return;
+            const available = availablePanels(sub, row);
+            if (available.length === 1) { selectPanel(sub, tr, row, toggle, available[0]); return; }
+            showPanelMenu(sub, tr, row, toggle);
+        }, { signal });
+        tbody.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            const toggle = event.target.closest('[data-vgrid-toggle]');
+            if (!toggle || toggle.tagName === 'BUTTON' || !rowOf(toggle)) return;
+            event.preventDefault();
+            toggle.click();
+        }, { signal });
+    }
+
+    const htmlText = document.createElement('template');
+    const cellText = (row, col) => {
+        const value = row[col.name] ?? '';
+        if (col.type === 'html') {
+            htmlText.innerHTML = value;
+            const text = htmlText.content.textContent;
+            htmlText.innerHTML = '';
+            return text;
+        }
+        if (col.type === 'enum') return String(col.options?.[value] ?? value);
+        return String(value);
+    };
+
+    const rowNumberText = (row, index, offset) => rowKeyColumn
+        ? String(row[rowKeyColumn.name] ?? '')
+        : rowNumbersType === 'sequential'
+        ? String(offset + index + 1)
+        : String(row[rowNumbersType] ?? '');
 
     const emptyRow = () => {
         const tr = document.createElement('tr');
@@ -1370,7 +1480,9 @@ function vGrid(config) {
 
     const buildRows = (rows, offset = 0) => {
         clearSubgrids();
-        tbody.innerHTML = '';
+        tbody.replaceChildren();
+        currentRows = rows;
+        currentOffset = offset;
         if (!rows.length) {
             tbody.appendChild(emptyRow());
             return;
@@ -1378,14 +1490,11 @@ function vGrid(config) {
         rows.forEach((row, index) => {
             const tr = document.createElement('tr');
             tr.className = partClass('row', row.id !== undefined && namePrefix ? `${namePrefix}-row-${row.id}` : '');
+            rowData.set(tr, row);
             const cells = [];
             if (rowNumbers) {
                 const td = document.createElement('td');
-                td.textContent = rowKeyColumn
-                    ? String(row[rowKeyColumn.name] ?? '')
-                    : rowNumbersType === 'sequential'
-                    ? String(offset + index + 1)
-                    : String(row[rowNumbersType] ?? '');
+                td.textContent = rowNumberText(row, index, offset);
                 cells.push(clipCell(td));
             }
             activeColumns.forEach(col => {
@@ -1413,19 +1522,6 @@ function vGrid(config) {
                         const toggle = createToggle(sub, available.length);
                         if (available.length === 1) toggle.dataset.vgridPanel = panelLabel(available[0]);
                         setToggleState(sub, toggle, false);
-                        toggle.addEventListener('click', () => {
-                            if (sub.menuOwner === toggle && sub.menu.matches(':popover-open')) { hidePanelMenus(); return; }
-                            if (sub.menuOwner === toggle && Date.now() - sub.menuClosedAt < 200) return;
-                            if (available.length === 1) { selectPanel(sub, tr, row, toggle, available[0]); return; }
-                            showPanelMenu(sub, tr, row, toggle);
-                        }, { signal });
-                        if (toggle.tagName !== 'BUTTON') {
-                            toggle.addEventListener('keydown', event => {
-                                if (event.key !== 'Enter' && event.key !== ' ') return;
-                                event.preventDefault();
-                                toggle.click();
-                            }, { signal });
-                        }
                         td.appendChild(toggle);
                     }
                     return td;
@@ -1487,8 +1583,6 @@ function vGrid(config) {
         loadingIndicator.style.display = 'none';
     };
 
-    if (!isRemote) buildRows(data);
-
     if (rowsPerPage && (showPagination || showRowsPerPage)) tfoot.appendChild(makeBar());
 
     if (bottomActions) {
@@ -1532,6 +1626,12 @@ function vGrid(config) {
     loadingIndicator.appendChild(loadingBadge);
     gridWrapper.appendChild(loadingIndicator);
 
+    if (autoDestroy === true) {
+        const destroyWhenDetached = () => { if (!gridWrapper.isConnected) instance.destroy(); };
+        window.addEventListener('resize', destroyWhenDetached, { signal });
+        window.addEventListener('scroll', destroyWhenDetached, { signal, capture: true });
+    }
+
     let sortColIndex = sortBy ? activeColumns.findIndex(c => c.name === sortBy.column) : null;
     let sortOrder    = sortBy ? (sortBy.order || 'asc') : null;
     let currentPage  = 1;
@@ -1541,6 +1641,7 @@ function vGrid(config) {
     let columnsFrozen = false;
     let cursorHost = null;
     let suppressHeaderClick = false;
+    let destroyed = false;
     const MIN_COLUMN_WIDTH = 40;
     const EDGE_TOLERANCE = 6;
     const buildRequest = (extra = {}) => {
@@ -1662,7 +1763,7 @@ function vGrid(config) {
             if (active) b.setAttribute('aria-current', 'page');
             if (ariaLabel) b.setAttribute('aria-label', ariaLabel);
             b.disabled = disabled;
-            b.addEventListener('click', () => { currentPage = page; render(); }, { signal });
+            b.dataset.vgridPage = String(page);
             return b;
         };
         pagerEl.appendChild(btn('«', 1, currentPage === 1, false, 'First page'));
@@ -1691,35 +1792,41 @@ function vGrid(config) {
         })
         .filter(({ val }) => val);
 
-    const rowMatchesFilters = (tr, values) => values.every(({ colIdx, val, exact }) => {
-        const cell = tr.cells[cellIndexOf(colIdx)];
-        if (!cell) return false;
-        const text = cell.textContent.toLowerCase();
+    const rowMatchesFilters = (row, values) => values.every(({ colIdx, val, exact }) => {
+        const col = activeColumns[colIdx];
+        if (!col) return false;
+        const text = cellText(row, col).toLowerCase();
         return exact ? exact.includes(text.trim()) : text.includes(val);
     });
+
+    const sortRows = rows => {
+        if (sortColIndex === null || sortColIndex === -1) return rows;
+        const col = activeColumns[sortColIndex];
+        if (!col) return rows;
+        return rows.sort((a, b) => {
+            const aVal = cellText(a, col);
+            const bVal = cellText(b, col);
+            return sortOrder === 'asc' ? compare(aVal, bVal) : compare(bVal, aVal);
+        });
+    };
+
+    const visibleData = () => {
+        const filterVals = activeFilterValues();
+        return sortRows(filterVals.length ? localData.filter(row => rowMatchesFilters(row, filterVals)) : localData.slice());
+    };
 
     const render = () => {
         if (isRemote) { fetchData(); return; }
 
-        const filterVals = activeFilterValues();
-        const allRows = dataRows();
-        const filtered = allRows.filter(tr => rowMatchesFilters(tr, filterVals));
+        const filtered = visibleData();
 
         const ps = currentPageSize();
         const totalPages = Math.max(1, ps ? Math.ceil(filtered.length / ps) : 1);
         if (currentPage > totalPages) currentPage = totalPages;
         if (currentPage < 1) currentPage = 1;
 
-        const start   = ps ? (currentPage - 1) * ps : 0;
-        const pageSet = new Set(ps ? filtered.slice(start, start + ps) : filtered);
-
-        let rowNum = start + 1;
-        allRows.forEach(tr => {
-            const visible = pageSet.has(tr);
-            tr.hidden = !visible;
-            panelRowsOf(tr).forEach(panelRow => { panelRow.hidden = !visible; });
-            if (visible && rowNumbers && !rowKeyColumn && rowNumbersType === 'sequential') tr.cells[rowNumberCellIndex()].textContent = String(rowNum++);
-        });
+        const start = ps ? (currentPage - 1) * ps : 0;
+        buildRows(ps ? filtered.slice(start, start + ps) : filtered, start);
 
         if (ps) {
             const from = filtered.length ? start + 1 : 0;
@@ -1752,12 +1859,9 @@ function vGrid(config) {
     };
 
     const downloadFromView = () => {
-        const values = activeFilterValues();
-        const rows = isRemote
-            ? dataRows().filter(tr => !tr.hidden)
-            : dataRows().filter(tr => rowMatchesFilters(tr, values));
+        const rows = isRemote ? currentRows : visibleData();
         const head = activeColumns.map(col => col.label || col.name);
-        const body = rows.map(tr => activeColumns.map((col, i) => tr.cells[cellIndexOf(i)]?.textContent ?? ''));
+        const body = rows.map(row => activeColumns.map(col => cellText(row, col)));
         const csv = '\uFEFF' + [head, ...body].map(line => line.map(csvValue).join(',')).join('\r\n');
         saveBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), `${downloadBaseName()}.csv`);
     };
@@ -1852,17 +1956,15 @@ function vGrid(config) {
         table.appendChild(head);
 
         const body = doc.createElement('tbody');
-        let printNumber = 1;
-        dataRows().filter(tr => !tr.hidden).forEach(tr => {
+        currentRows.forEach((data, index) => {
             const row = doc.createElement('tr');
             const numberCell = doc.createElement('td');
-            const gridNumber = rowNumbers ? (tr.cells[rowNumberCellIndex()]?.textContent ?? '').trim() : '';
-            numberCell.textContent = gridNumber || String(printNumber);
-            printNumber++;
+            const gridNumber = rowNumbers ? rowNumberText(data, index, currentOffset).trim() : '';
+            numberCell.textContent = gridNumber || String(index + 1);
             row.appendChild(numberCell);
-            activeColumns.forEach((col, i) => {
+            activeColumns.forEach(col => {
                 const td = doc.createElement('td');
-                td.textContent = (tr.cells[cellIndexOf(i)]?.textContent ?? '').replace(/\s+/g, ' ').trim();
+                td.textContent = cellText(data, col).replace(/\s+/g, ' ').trim();
                 row.appendChild(td);
             });
             body.appendChild(row);
@@ -1925,20 +2027,6 @@ function vGrid(config) {
         if (externalSortColumnElement) externalSortColumnElement.value = activeColumns[sortColIndex]?.name ?? '';
         if (externalSortDirectionElement) externalSortDirectionElement.value = sortOrder || 'asc';
         onSort?.({ column: activeColumns[sortColIndex]?.name, order: sortOrder });
-
-        if (isRemote) { render(); return; }
-
-        const rows = dataRows();
-        const attachedPanelRows = new Map(rows.map(tr => [tr, panelRowsOf(tr)]));
-        rows.sort((a, b) => {
-            const aVal = (a.cells[cellIndexOf(sortColIndex)] || {}).textContent || '';
-            const bVal = (b.cells[cellIndexOf(sortColIndex)] || {}).textContent || '';
-            return sortOrder === 'asc' ? compare(aVal, bVal) : compare(bVal, aVal);
-        });
-        rows.forEach(row => {
-            tbody.appendChild(row);
-            attachedPanelRows.get(row)?.forEach(panelRow => tbody.appendChild(panelRow));
-        });
         render();
     };
 
@@ -1974,11 +2062,11 @@ function vGrid(config) {
 
         columnsFrozen = false;
         element.style.tableLayout = 'auto';
+        setCursorHost(null);
         updateSortIndicators();
         currentPage = 1;
 
         if (isRemote) { fetchData(); return; }
-        buildRows(localData);
         if (sortColIndex !== null && sortColIndex !== -1) applySort();
         else render();
         freezeColumns();
@@ -2140,12 +2228,12 @@ function vGrid(config) {
         config,
 
         reload(newData) {
+            if (destroyed) return instance;
             currentPage = 1;
             if (isRemote) { fetchData(); return instance; }
             if (newData !== undefined) {
                 if (!Array.isArray(newData)) { console.error('vGrid: reload() expects an array of rows.'); return instance; }
                 localData = newData;
-                buildRows(newData);
                 updatePageSizeOptions(newData.length);
             }
             if (sortColIndex !== null && sortColIndex !== -1) applySort();
@@ -2154,6 +2242,7 @@ function vGrid(config) {
         },
 
         setPage(n) {
+            if (destroyed) return instance;
             const page = parseInt(n);
             if (!Number.isFinite(page) || page < 1) { console.error('vGrid: setPage() expects a page number of 1 or greater.'); return instance; }
             currentPage = page;
@@ -2162,6 +2251,7 @@ function vGrid(config) {
         },
 
         sort(column, order = 'asc') {
+            if (destroyed) return instance;
             const idx = activeColumns.findIndex(c => c.name === column);
             if (idx === -1) { console.warn(`vGrid: column "${column}" not found`); return instance; }
             sortColIndex = idx;
@@ -2171,16 +2261,37 @@ function vGrid(config) {
         },
 
         destroy() {
+            if (destroyed) return;
+            destroyed = true;
             controller.abort();
             if (resizeState) {
                 resizeState = null;
                 document.body.style.cursor = '';
             }
+            setCursorHost(null);
             if (fetchAbort) fetchAbort.abort();
             clearSubgrids();
-            subgrids.forEach(sub => sub.menu.remove());
+            subgrids.forEach(sub => {
+                if (sub.menuFrame) cancelAnimationFrame(sub.menuFrame);
+                sub.menuFrame = 0;
+                sub.menu.remove();
+            });
             clearTimeout(filterTimer);
             clearTimeout(loadingShowTimer);
+            tbody.replaceChildren();
+            localData = [];
+            currentRows = [];
+            colSpanCells.length = 0;
+            columnCols.length = 0;
+            headerCells.length = 0;
+            columnHeaders.length = 0;
+            columnHeaderLabels.length = 0;
+            filterInputs.length = 0;
+            filterClears.length = 0;
+            filterDefaults.clear();
+            infoEls.length = 0;
+            pagerEls.length = 0;
+            rowsPerPageSelects.length = 0;
             loadingIndicator.remove();
             settingsPanel.remove();
             settingsButton?.remove();

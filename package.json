@@ -1,6 +1,6 @@
 {
   "name": "vgrid",
-  "version": "1.0.541",
+  "version": "1.0.542",
   "description": "Virgil's Grid (vGrid): a zero-dependency JavaScript data grid for the browser, React, and Vue.",
   "license": "MIT",
   "homepage": "https://github.com/virgil2304/vGrid#readme",
