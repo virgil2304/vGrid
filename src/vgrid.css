@@ -247,7 +247,8 @@ button.vgrid-toggle-subgrid {
     outline-offset: 1px;
 }
 
-.vgrid-panel-menu {
+.vgrid-panel-menu,
+.vgrid-filter-mode-menu {
     position: fixed;
     inset: auto;
     box-sizing: border-box;
@@ -266,7 +267,8 @@ button.vgrid-toggle-subgrid {
 }
 
 .vgrid-settings,
-.vgrid-panel-menu {
+.vgrid-panel-menu,
+.vgrid-filter-mode-menu {
     opacity: 0;
     transform: translateY(-.2em);
     transition: opacity var(--vgrid-easing, 160ms) cubic-bezier(.4, 0, .2, 1),
@@ -276,14 +278,16 @@ button.vgrid-toggle-subgrid {
 }
 
 .vgrid-settings:popover-open,
-.vgrid-panel-menu:popover-open {
+.vgrid-panel-menu:popover-open,
+.vgrid-filter-mode-menu:popover-open {
     opacity: 1;
     transform: translateY(0);
 }
 
 @starting-style {
     .vgrid-settings:popover-open,
-    .vgrid-panel-menu:popover-open {
+    .vgrid-panel-menu:popover-open,
+    .vgrid-filter-mode-menu:popover-open {
         opacity: 0;
         transform: translateY(-.2em);
     }
@@ -291,7 +295,8 @@ button.vgrid-toggle-subgrid {
 
 @media (prefers-reduced-motion: reduce) {
     .vgrid-settings,
-    .vgrid-panel-menu {
+    .vgrid-panel-menu,
+    .vgrid-filter-mode-menu {
         transition-duration: 1ms;
         transform: none;
     }
@@ -299,6 +304,7 @@ button.vgrid-toggle-subgrid {
 
 .vgrid-settings,
 .vgrid-panel-menu,
+.vgrid-filter-mode-menu,
 .vgrid-subgrid-body {
     scrollbar-width: thin;
     scrollbar-color: var(--vgrid-scrollbar-color, GrayText) transparent;
@@ -306,6 +312,7 @@ button.vgrid-toggle-subgrid {
 
 .vgrid-settings::-webkit-scrollbar,
 .vgrid-panel-menu::-webkit-scrollbar,
+.vgrid-filter-mode-menu::-webkit-scrollbar,
 .vgrid-subgrid-body::-webkit-scrollbar {
     width: .7em;
     height: .7em;
@@ -313,12 +320,14 @@ button.vgrid-toggle-subgrid {
 
 .vgrid-settings::-webkit-scrollbar-track,
 .vgrid-panel-menu::-webkit-scrollbar-track,
+.vgrid-filter-mode-menu::-webkit-scrollbar-track,
 .vgrid-subgrid-body::-webkit-scrollbar-track {
     background: transparent;
 }
 
 .vgrid-settings::-webkit-scrollbar-thumb,
 .vgrid-panel-menu::-webkit-scrollbar-thumb,
+.vgrid-filter-mode-menu::-webkit-scrollbar-thumb,
 .vgrid-subgrid-body::-webkit-scrollbar-thumb {
     background: var(--vgrid-scrollbar-color, GrayText);
     background-clip: padding-box;
@@ -326,7 +335,8 @@ button.vgrid-toggle-subgrid {
     border-radius: 1em;
 }
 
-.vgrid-panel-menu-item {
+.vgrid-panel-menu-item,
+.vgrid-filter-mode-item {
     display: block;
     width: 100%;
     padding: .25em .75em;
@@ -342,16 +352,20 @@ button.vgrid-toggle-subgrid {
 }
 
 .vgrid-panel-menu-item:hover,
-.vgrid-panel-menu-item:focus-visible {
+.vgrid-panel-menu-item:focus-visible,
+.vgrid-filter-mode-item:hover,
+.vgrid-filter-mode-item:focus-visible {
     background: ButtonFace;
 }
 
-.vgrid-panel-menu-item:focus-visible {
+.vgrid-panel-menu-item:focus-visible,
+.vgrid-filter-mode-item:focus-visible {
     outline: 2px solid AccentColor;
     outline-offset: -2px;
 }
 
-.vgrid-panel-menu-item[aria-checked="true"] {
+.vgrid-panel-menu-item[aria-checked="true"],
+.vgrid-filter-mode-item[aria-checked="true"] {
     font-weight: 700;
 }
 
@@ -514,6 +528,11 @@ button.vgrid-toggle-subgrid {
     border-style: solid;
     border-color: var(--vgrid-border-color, #dee2e6);
     border-width: var(--vgrid-border-h, var(--vgrid-border-width, 1px)) var(--vgrid-border-v, var(--vgrid-border-width, 1px));
+}
+
+.vgrid-filter-mode:focus-visible {
+    outline: 2px solid AccentColor;
+    outline-offset: -2px;
 }
 
 .vgrid-filter input,
