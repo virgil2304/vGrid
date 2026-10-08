@@ -6,7 +6,7 @@ function vGrid(config) {
         filterRow = true, filterClear = true, sortBy, rowsPerPage: rowsPerPageConfig, rowsPerPageOptions: rowsPerPageOptionsConfig, showPaginationControls = true,
         showPagination = showPaginationControls, showRowsPerPage = showPaginationControls,
         externalFilters = {}, externalRowsPerPage, externalPagination, externalSort = {}, externalSummary = {},
-        settings = true, externalSettings, subgrid, borders = 'horizontal', size = 'medium', actions = 'caption', easing = 160,
+        settings = true, externalSettings, subgrid, borders = 'horizontal', size = 'medium', striped = true, hover = true, actions = 'caption', easing = 160,
         download = false, print = true, autoDestroy = false,
         onSort, onFilter, onPage, onReady, namespace } = config;
 
@@ -42,6 +42,9 @@ function vGrid(config) {
         console.error(`vGrid: size must be one of ${sizePresets.join(', ')}.`);
     }
     const sizePreset = sizePresets.includes(size) ? size : 'medium';
+
+    if (typeof striped !== 'boolean') console.error('vGrid: striped must be true or false.');
+    if (typeof hover !== 'boolean') console.error('vGrid: hover must be true or false.');
 
     const actionNames = ['clear', 'download', 'print', 'refresh', 'settings'];
     const actionDefaults = {
@@ -1112,6 +1115,8 @@ function vGrid(config) {
                 externalFilters: panel.externalFilters || {},
                 borders: panel.borders || borderPreset,
                 size: panel.size || 'medium',
+                striped: panel.striped ?? striped,
+                hover: panel.hover ?? hover,
                 easing: panel.easing ?? easingMs,
                 namespace: namePrefix,
                 settings: false,
@@ -1490,6 +1495,7 @@ function vGrid(config) {
         rows.forEach((row, index) => {
             const tr = document.createElement('tr');
             tr.className = partClass('row', row.id !== undefined && namePrefix ? `${namePrefix}-row-${row.id}` : '');
+            if (index % 2 === 0) tr.dataset.vgridStripe = '1';
             rowData.set(tr, row);
             const cells = [];
             if (rowNumbers) {
@@ -1605,6 +1611,8 @@ function vGrid(config) {
     gridWrapper.className = 'vgrid-wrapper';
     gridWrapper.dataset.vgridBorders = borderPreset;
     gridWrapper.dataset.vgridSize = sizePreset;
+    if (striped !== false) gridWrapper.dataset.vgridStriped = '1';
+    if (hover !== false) gridWrapper.dataset.vgridHover = '1';
     gridWrapper.style.cssText = 'display:block;position:relative;width:100%;overflow:hidden;';
     gridWrapper.style.setProperty('--vgrid-easing', `${easingMs}ms`);
     element.replaceWith(gridWrapper);

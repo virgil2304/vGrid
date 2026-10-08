@@ -565,3 +565,15 @@ button.vgrid-toggle-subgrid {
     --vgrid-border-v: 0;
     border-width: 0;
 }
+
+.vgrid-wrapper[data-vgrid-striped] > .vgrid > tbody > tr[data-vgrid-stripe] > td {
+    background-color: var(--vgrid-stripe-color, rgba(128, 128, 128, .07));
+}
+
+.vgrid-wrapper[data-vgrid-hover] > .vgrid > tbody > tr.vgrid-row > td {
+    transition: background-color var(--vgrid-easing, 160ms) ease;
+}
+
+.vgrid-wrapper[data-vgrid-hover] > .vgrid > tbody > tr.vgrid-row:hover > td {
+    background-color: var(--vgrid-hover-color, rgba(128, 128, 128, .18));
+}
