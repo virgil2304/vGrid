@@ -1,4 +1,4 @@
-/* vGrid v1.0.543 */
+/* vGrid v1.0.544 */
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -791,21 +791,26 @@ function vGrid(config) {
       console.error(`vGrid: filterModes on column "${col.name}" works with text filters only.`);
     } else if (source) {
       modes = Object.entries(source).map(([key, value]) => {
-        const keys = key.split(",").map((part) => part.trim()).filter(Boolean);
-        if (!keys.length || keys.length > 2) {
-          console.error(`vGrid: filterModes key "${key}" on column "${col.name}" must name one parameter, or two separated by a comma.`);
+        const described = value !== null && typeof value === "object" && !(value instanceof Element);
+        const isRange = key === "range";
+        const keys = isRange ? described && Array.isArray(value.keys) ? value.keys.map((part) => String(part ?? "").trim()) : [] : [key.trim()];
+        if (isRange && (keys.length !== 2 || keys.some((part) => !part) || keys[0] === keys[1])) {
+          console.error(`vGrid: filterModes range on column "${col.name}" needs keys: an array of two different parameter names.`);
+          return null;
+        }
+        if (!keys[0]) {
+          console.error(`vGrid: filterModes on column "${col.name}" has an empty parameter name.`);
           return null;
         }
         const reserved = keys.filter((part) => reservedColumnNames.has(part.toLowerCase()));
         if (reserved.length) {
-          console.error(`vGrid: filterModes key "${key}" on column "${col.name}" uses the reserved name(s) ${reserved.join(", ")}.`);
+          console.error(`vGrid: filterModes ${isRange ? "range" : `key "${key}"`} on column "${col.name}" uses the reserved name(s) ${reserved.join(", ")}.`);
           return null;
         }
-        const described = value !== null && typeof value === "object" && !(value instanceof Element);
         const label = described ? value.label : value;
         const text = (label instanceof Element ? label.textContent : htmlToText(label ?? "")).trim() || keys.join(" \u2013 ");
         const symbol = described && value.symbol !== void 0 && value.symbol !== null ? String(value.symbol) : "";
-        return { key: keys.join(","), keys, label: label ?? text, text, symbol, face: symbol || [...text][0] };
+        return { key, keys, label: label ?? text, text, symbol, face: symbol || [...text][0] };
       }).filter(Boolean);
       if (!modes.some((mode) => mode.key === col.name)) {
         modes.unshift({ key: col.name, keys: [col.name], label: "Contains", text: "Contains", symbol: "\u2248", face: "\u2248" });
@@ -2210,6 +2215,7 @@ function vGrid(config) {
   };
   const resizableRow = (target2) => {
     const row = target2?.closest?.("tr");
+    if (target2?.closest?.("[data-vgrid-filter-mode], [data-vgrid-filter-clear]")) return false;
     return !!row && (row === headerRow || row === filterRowElement);
   };
   const resizeColumns = (delta) => {
