@@ -1,14 +1,15 @@
-/* vGrid v1.0.0.5.44 | Last updated: 2026-10-08 */
+/* vGrid v1.0.0.5.47 | Last updated: 2026-10-12 */
 export function vGrid(config) {
 
-    const { el, caption, columns = [], data = [], dataSource, method = 'GET', headers = {},
+    const { el, caption, columns: columnsConfig = [], data = [], dataSource, method = 'GET', headers = {},
         rowNumbers = true, rowNumbersType = 'sequential',
         filterRow = true, filterClear = true, sortBy, rowsPerPage: rowsPerPageConfig, rowsPerPageOptions: rowsPerPageOptionsConfig, showPaginationControls = true,
         showPagination = showPaginationControls, showRowsPerPage = showPaginationControls,
         externalFilters = {}, externalRowsPerPage, externalPagination, externalSort = {}, externalSummary = {},
-        settings = true, externalSettings, subgrid, borders = 'horizontal', size = 'medium', striped = true, hover = true, actions = 'caption', easing = 160,
-        download = false, print = true, autoDestroy = false,
+        settings = true, externalSettings, subgrid, inheritQueryString = false, borders = 'horizontal', size = 'medium', striped = true, hover = true, actions = 'caption', easing = 160,
+        download = false, print = true, autoDestroy = false, reorderColumns = true, reorderDelay = 350,
         onSort, onFilter, onPage, onReady, namespace } = config;
+    const columns = Array.isArray(columnsConfig) ? [...columnsConfig] : [];
 
     const toPageSize = value => {
         const size = parseInt(value);
@@ -144,6 +145,11 @@ export function vGrid(config) {
         console.error('vGrid: easing must be a duration in milliseconds, 0 for none.');
     }
     const easingMs = Number.isFinite(easingValue) && easingValue >= 0 ? easingValue : 160;
+    const reorderDelayValue = Number(reorderDelay);
+    if (!Number.isFinite(reorderDelayValue) || reorderDelayValue < 0) {
+        console.error('vGrid: reorderDelay must be a number of milliseconds, 0 or more.');
+    }
+    const reorderDelayMs = Number.isFinite(reorderDelayValue) && reorderDelayValue >= 0 ? reorderDelayValue : 350;
 
     const reservedColumnNames = new Set([
         'page', 'limit', 'sort', 'dir', 'offset', 'cursor',
@@ -231,6 +237,10 @@ export function vGrid(config) {
                 columns.forEach(column => {
                     if (typeof saved[column.name] === 'boolean') column.active = saved[column.name];
                 });
+                const savedOrder = Object.keys(saved);
+                const slots = columns.map((column, index) => savedOrder.includes(column.name) ? index : -1).filter(index => index !== -1);
+                const ordered = slots.map(index => columns[index]).sort((a, b) => savedOrder.indexOf(a.name) - savedOrder.indexOf(b.name));
+                slots.forEach((slot, index) => { columns[slot] = ordered[index]; });
                 if (!columns.some(column => column.active !== false)) {
                     columns.forEach(column => { column.active = true; });
                 }
@@ -480,6 +490,7 @@ export function vGrid(config) {
         }, { signal });
     }
 
+    let syncSettingsOrder = () => {};
     if (resolvedActions.settings.active) {
         vGrid.instanceCount = (vGrid.instanceCount || 0) + 1;
         settingsPanel.id = `vgrid-settings-${vGrid.instanceCount}`;
@@ -514,11 +525,15 @@ export function vGrid(config) {
                     checkbox.checked = true;
                 }
             }, { signal });
-            settingsCheckboxes.push({ column: col, checkbox });
+            settingsCheckboxes.push({ column: col, checkbox, row });
             row.append(checkbox, document.createTextNode(` ${col.label || col.name}`));
             fieldset.appendChild(row);
         });
         settingsPanel.appendChild(fieldset);
+        syncSettingsOrder = () => {
+            settingsCheckboxes.sort((a, b) => columns.indexOf(a.column) - columns.indexOf(b.column));
+            fieldset.append(...settingsCheckboxes.map(entry => entry.row));
+        };
 
         const applyPending = () => {
             settingsCheckboxes.forEach(({ column, checkbox }) => { column.active = checkbox.checked; });
@@ -1145,6 +1160,95 @@ export function vGrid(config) {
             const button = event.target.closest('[data-vgrid-filter-clear]');
             if (button) button.style.opacity = '.6';
         }, { signal });
+
+        const MAGNIFY_EM = 12;
+        const MAGNIFY_INSET = 4;
+        const MAGNIFY_STYLES = ['width', 'marginLeft', 'marginRight', 'position', 'zIndex'];
+        const magnifiedFields = new Map();
+        const settleMagnify = entry => {
+            clearTimeout(entry.timer);
+            if (entry.onEnd) entry.field.removeEventListener('transitionend', entry.onEnd);
+            MAGNIFY_STYLES.forEach(name => { entry.field.style[name] = entry.saved[name]; });
+            delete entry.field.dataset.vgridMagnified;
+            entry.cell.style.overflow = 'hidden';
+            magnifiedFields.delete(entry.field);
+        };
+        const expandField = entry => {
+            clearTimeout(entry.timer);
+            if (entry.onEnd) entry.field.removeEventListener('transitionend', entry.onEnd);
+            entry.onEnd = null;
+            entry.state = 'open';
+            entry.field.dataset.vgridMagnified = '1';
+            entry.field.style.width = `${entry.width}px`;
+            entry.field.style.marginLeft = `${-entry.shift}px`;
+            entry.field.style.marginRight = `${entry.base - entry.width + entry.shift}px`;
+        };
+        const magnify = control => {
+            if (control.tagName !== 'INPUT') return;
+            const cell = control.closest('td');
+            const field = cell?.firstElementChild;
+            if (!field || cell.parentElement !== filterRowElement) return;
+            const known = magnifiedFields.get(field);
+            if (known) {
+                if (known.state === 'closing') expandField(known);
+                return;
+            }
+            const fieldRect = field.getBoundingClientRect();
+            const wrapperRect = gridWrapper.getBoundingClientRect();
+            const em = parseFloat(getComputedStyle(control).fontSize) || 16;
+            const inputs = field.tagName === 'INPUT' ? 1 : field.querySelectorAll('input').length || 1;
+            const room = wrapperRect.width - MAGNIFY_INSET * 2;
+            const width = Math.min(MAGNIFY_EM * em * inputs, room);
+            if (width <= fieldRect.width + 1) return;
+            const left = fieldRect.left - wrapperRect.left;
+            const shift = Math.max(0, Math.min(left - MAGNIFY_INSET, left + width - wrapperRect.width + MAGNIFY_INSET));
+            const saved = {};
+            MAGNIFY_STYLES.forEach(name => { saved[name] = field.style[name]; });
+            const entry = { cell, field, saved, base: fieldRect.width, width, shift, state: 'open', timer: null, onEnd: null };
+            magnifiedFields.set(field, entry);
+            cell.style.overflow = 'visible';
+            field.style.position = saved.position || 'relative';
+            field.style.zIndex = '3';
+            field.style.width = `${entry.base}px`;
+            field.style.marginLeft = '0px';
+            field.style.marginRight = '0px';
+            void field.offsetWidth;
+            expandField(entry);
+        };
+        const collapseField = entry => {
+            if (entry.state === 'closing') return;
+            if (!entry.field.isConnected) { settleMagnify(entry); return; }
+            entry.state = 'closing';
+            delete entry.field.dataset.vgridMagnified;
+            entry.field.style.width = `${entry.base}px`;
+            entry.field.style.marginLeft = '0px';
+            entry.field.style.marginRight = '0px';
+            entry.onEnd = event => {
+                if (event.target === entry.field && event.propertyName === 'width') settleMagnify(entry);
+            };
+            entry.field.addEventListener('transitionend', entry.onEnd, { signal });
+            entry.timer = setTimeout(() => settleMagnify(entry), easingMs + 150);
+        };
+        const collapseUnfocused = () => {
+            const active = document.activeElement;
+            magnifiedFields.forEach(entry => {
+                if (!entry.field.contains(active)) collapseField(entry);
+            });
+        };
+        filterRowElement.addEventListener('focusin', event => {
+            const control = filterControlOf(event.target);
+            if (control) magnify(control);
+        }, { signal });
+        filterRowElement.addEventListener('focusout', event => {
+            const next = event.relatedTarget;
+            if (next && filterModeMenu.menu.contains(next)) return;
+            magnifiedFields.forEach(entry => {
+                if (entry.field.contains(event.target) && !entry.field.contains(next)) collapseField(entry);
+            });
+        }, { signal });
+        filterModeMenu.menu.addEventListener('toggle', event => {
+            if (event.newState === 'closed') setTimeout(collapseUnfocused);
+        }, { signal });
         thead.appendChild(filterRowElement);
 
         const modeMenu = filterModeMenu.menu;
@@ -1215,6 +1319,18 @@ export function vGrid(config) {
             return value === '' ? null : `${encodeURIComponent(name)}=${encodeURIComponent(value)}`;
         })
         .filter(Boolean);
+
+    const mergeQuery = (url, base) => {
+        const cut = url.indexOf('?');
+        const own = new URLSearchParams(cut < 0 ? '' : url.slice(cut + 1));
+        const merged = new URLSearchParams(base);
+        new Set(own.keys()).forEach(key => merged.delete(key));
+        own.forEach((value, key) => merged.append(key, value));
+        const query = merged.toString();
+        return `${cut < 0 ? url : url.slice(0, cut)}${query ? `?${query}` : ''}`;
+    };
+
+    const inheritQuery = url => inheritQueryString === true ? mergeQuery(url, window.location.search) : url;
 
     const panelUrl = (panel, value, withFilters = true) => {
         const encoded = encodeURIComponent(value);
@@ -1328,7 +1444,7 @@ export function vGrid(config) {
             entry.instance = vGrid({
                 el: host,
                 columns: panel.columns || [],
-                dataSource: panelUrl(panel, value, false),
+                dataSource: inheritQuery(panelUrl(panel, value, false)),
                 method: panel.method || 'GET',
                 headers: panel.headers || {},
                 rowsPerPage: panel.rowsPerPage ?? 10,
@@ -1340,6 +1456,8 @@ export function vGrid(config) {
                 striped: panel.striped ?? striped,
                 hover: panel.hover ?? hover,
                 easing: panel.easing ?? easingMs,
+                reorderColumns: panel.reorderColumns ?? reorderColumns,
+                reorderDelay: panel.reorderDelay ?? reorderDelayMs,
                 namespace: namePrefix,
                 settings: false,
                 actions: false,
@@ -1357,7 +1475,7 @@ export function vGrid(config) {
             return;
         }
         content.replaceChildren(panelNotice('loading', 'Loading\u2026'));
-        const url = panelUrl(panel, value);
+        const url = inheritQuery(panelUrl(panel, value));
         const fetchAbort = entry.fetchAbort = new AbortController();
         fetch(url, { signal: fetchAbort.signal, method: panel.method || 'GET', headers: requestHeaders(url, panel.headers) })
             .then(response => { if (!response.ok) throw new Error(String(response.status)); return response.text(); })
@@ -1903,7 +2021,8 @@ export function vGrid(config) {
             if (payload.columns)   p.set('columns', payload.columns);
             Object.entries(filter).forEach(([k, v]) => p.set(k, v));
             Object.entries(extra).forEach(([k, v]) => p.set(k, v));
-            return `${dataSource}${dataSource.includes('?') ? '&' : '?'}${p}`;
+            const cut = dataSource.indexOf('?');
+            return cut < 0 ? `${dataSource}?${p}` : mergeQuery(`${dataSource.slice(0, cut)}?${p}`, dataSource.slice(cut + 1));
         };
 
         return { usePost, payload, url: usePost ? dataSource : getUrl() };
@@ -2369,6 +2488,7 @@ export function vGrid(config) {
     };
 
     element.addEventListener('pointermove', event => {
+        if (reorderState) return;
         if (resizeState) {
             resizeColumns(event.clientX - resizeState.startX);
             return;
@@ -2399,6 +2519,161 @@ export function vGrid(config) {
     element.addEventListener('pointerup', finishColumnResize, { capture: true, signal });
     element.addEventListener('pointercancel', finishColumnResize, { capture: true, signal });
     element.addEventListener('lostpointercapture', finishColumnResize, { capture: true, signal });
+
+    const REORDER_SLOP = 6;
+    let reorderState = null;
+
+    const columnCells = position => {
+        const slot = headerCells.indexOf(columnHeaders[position]);
+        if (slot === -1) return [];
+        return [...element.querySelectorAll(':scope > thead > tr, :scope > tbody > tr')]
+            .filter(tr => tr.children.length === headerCells.length)
+            .map(tr => tr.children[slot]);
+    };
+
+    const moveColumn = (from, to) => {
+        if (to === from || to === from + 1) return false;
+        const slots = columnHeaders.map(th => headerCells.indexOf(th));
+        const order = activeColumns.map((unused, index) => index);
+        order.splice(to > from ? to - 1 : to, 0, ...order.splice(from, 1));
+        const permute = items => {
+            const next = items.slice();
+            slots.forEach((slot, index) => { next[slot] = items[slots[order[index]]]; });
+            return next;
+        };
+        const kept = keptFilterValues();
+        const sortName = sortColIndex !== null && sortColIndex !== -1 ? activeColumns[sortColIndex]?.name : null;
+        const widths = permute(columnCols.map(col => col.style.width));
+        [...element.querySelectorAll(':scope > tbody > tr')]
+            .filter(tr => tr.children.length === headerCells.length)
+            .forEach(tr => tr.replaceChildren(...permute([...tr.children])));
+        const moved = activeColumns[from];
+        const anchor = activeColumns[to];
+        const last = activeColumns[activeColumns.length - 1];
+        columns.splice(columns.indexOf(moved), 1);
+        columns.splice(anchor ? columns.indexOf(anchor) : columns.indexOf(last) + 1, 0, moved);
+        activeColumns = columns.filter(column => column.active !== false);
+        if (sortName) sortColIndex = activeColumns.findIndex(column => column.name === sortName);
+        buildHeaderRow();
+        if (columnsFrozen) headerCells.forEach(th => th.removeAttribute('width'));
+        updateSortIndicators();
+        buildFilterRow();
+        restoreFilterValues(kept);
+        buildExternalSortOptions();
+        columnCols.forEach((col, index) => { col.style.width = widths[index]; });
+        syncSettingsOrder();
+        return true;
+    };
+
+    const placeReorder = x => {
+        const state = reorderState;
+        const wrap = gridWrapper.getBoundingClientRect();
+        state.ghost.style.left = `${Math.max(0, Math.min(x - wrap.left - state.grab, wrap.width - state.width))}px`;
+        const to = columnHeaders.filter(th => {
+            const rect = th.getBoundingClientRect();
+            return rect.left + rect.width / 2 < x;
+        }).length;
+        state.to = to;
+        const edge = to < columnHeaders.length
+            ? columnHeaders[to].getBoundingClientRect().left
+            : columnHeaders[columnHeaders.length - 1].getBoundingClientRect().right;
+        state.marker.style.left = `${Math.max(0, Math.min(edge - wrap.left - 1.5, wrap.width - 3))}px`;
+        state.marker.style.opacity = to === state.from || to === state.from + 1 ? '0' : '1';
+    };
+
+    const startReorder = () => {
+        const state = reorderState;
+        const th = columnHeaders[state?.from];
+        if (!state || destroyed || !th?.isConnected) { reorderState = null; return; }
+        state.active = true;
+        const rect = th.getBoundingClientRect();
+        const wrap = gridWrapper.getBoundingClientRect();
+        const table = element.getBoundingClientRect();
+        const style = getComputedStyle(th);
+        const align = style.textAlign;
+        state.width = rect.width;
+        state.grab = state.x - rect.left;
+        const ghost = document.createElement('div');
+        ghost.className = partClass('column-ghost');
+        ghost.textContent = th.textContent;
+        ghost.setAttribute('aria-hidden', 'true');
+        ghost.style.cssText = `position:absolute;z-index:5;top:${rect.top - wrap.top}px;left:${rect.left - wrap.left}px;width:${rect.width}px;height:${rect.height}px;box-sizing:border-box;padding:${style.padding};display:flex;align-items:center;justify-content:${align === 'center' || align.endsWith('center') ? 'center' : align === 'right' || align === 'end' ? 'flex-end' : 'flex-start'};overflow:hidden;white-space:nowrap;pointer-events:none;`;
+        const marker = document.createElement('div');
+        marker.className = partClass('column-marker');
+        marker.setAttribute('aria-hidden', 'true');
+        marker.style.cssText = `position:absolute;z-index:4;top:${rect.top - wrap.top}px;height:${table.bottom - rect.top}px;width:3px;opacity:0;pointer-events:none;`;
+        gridWrapper.append(marker, ghost);
+        state.ghost = ghost;
+        state.marker = marker;
+        state.cells = columnCells(state.from);
+        state.cells.forEach(cell => { cell.dataset.vgridDragSource = '1'; });
+        document.body.style.cursor = 'grabbing';
+        element.style.userSelect = 'none';
+        suppressHeaderClick = true;
+        placeReorder(state.x);
+    };
+
+    const endReorder = commit => {
+        const state = reorderState;
+        if (!state) return;
+        reorderState = null;
+        clearTimeout(state.timer);
+        if (!state.active) return;
+        state.ghost.remove();
+        state.marker.remove();
+        state.cells.forEach(cell => { delete cell.dataset.vgridDragSource; });
+        document.body.style.cursor = '';
+        element.style.userSelect = '';
+        setTimeout(() => { suppressHeaderClick = false; }, 0);
+        if (!commit || !moveColumn(state.from, state.to)) return;
+        const cells = columnCells(activeColumns.indexOf(state.column));
+        cells.forEach(cell => { cell.dataset.vgridDropped = '1'; });
+        setTimeout(() => cells.forEach(cell => { delete cell.dataset.vgridDropped; }), easingMs * 4 + 100);
+    };
+
+    if (reorderColumns !== false) {
+        headerRow.addEventListener('pointerdown', event => {
+            if (event.button !== 0 || reorderState || resizeState) return;
+            const from = columnHeaders.indexOf(event.target.closest('th'));
+            if (from === -1 || activeColumns.length < 2) return;
+            reorderState = {
+                pointerId: event.pointerId,
+                from,
+                to: from,
+                column: activeColumns[from],
+                x: event.clientX,
+                startX: event.clientX,
+                startY: event.clientY,
+                active: false,
+                timer: setTimeout(startReorder, reorderDelayMs),
+            };
+        }, { signal });
+        document.addEventListener('pointermove', event => {
+            const state = reorderState;
+            if (!state || state.pointerId !== event.pointerId) return;
+            state.x = event.clientX;
+            if (state.active) placeReorder(event.clientX);
+            else if (Math.hypot(event.clientX - state.startX, event.clientY - state.startY) > REORDER_SLOP) endReorder(false);
+        }, { signal });
+        document.addEventListener('pointerup', event => {
+            if (reorderState?.pointerId === event.pointerId) endReorder(true);
+        }, { signal });
+        document.addEventListener('pointercancel', event => {
+            if (reorderState?.pointerId === event.pointerId) endReorder(false);
+        }, { signal });
+        document.addEventListener('keydown', event => {
+            if (event.key !== 'Escape' || !reorderState?.active) return;
+            event.preventDefault();
+            endReorder(false);
+        }, { signal });
+        headerRow.addEventListener('touchmove', event => {
+            if (reorderState?.active) event.preventDefault();
+        }, { passive: false, signal });
+        headerRow.addEventListener('contextmenu', event => {
+            if (reorderState) event.preventDefault();
+        }, { signal });
+        gridWrapper.dataset.vgridReorder = '1';
+    }
 
     externalFilterInputs.forEach(({ element }) => element.addEventListener('change', () => {
         if (resettingFilters) return;

@@ -535,6 +535,89 @@ button.vgrid-toggle-subgrid {
     outline-offset: -2px;
 }
 
+.vgrid-wrapper[data-vgrid-reorder] .vgrid-header th {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+}
+
+.vgrid-column-ghost {
+    background-color: Canvas;
+    color: inherit;
+    font-weight: 700;
+    border: var(--vgrid-border-width, 1px) solid var(--vgrid-border-color, #dee2e6);
+    border-radius: var(--vgrid-border-radius, .25rem);
+    box-shadow: var(--vgrid-drag-shadow, 0 .2em .45em rgba(0, 0, 0, .12), 0 .8em 2em rgba(0, 0, 0, .22));
+    animation: vgrid-column-lift calc(var(--vgrid-easing, 160ms) * 1.5) cubic-bezier(.2, .9, .3, 1.25) both;
+}
+
+@keyframes vgrid-column-lift {
+    from {
+        opacity: .6;
+        transform: none;
+        box-shadow: none;
+    }
+    to {
+        opacity: .96;
+        transform: scale(1.06) rotate(-1deg);
+    }
+}
+
+.vgrid-column-marker {
+    background-color: AccentColor;
+    border-radius: 3px;
+    box-shadow: 0 0 .6em AccentColor;
+    transition:
+        left var(--vgrid-easing, 160ms) cubic-bezier(.4, 0, .2, 1),
+        opacity var(--vgrid-easing, 160ms) ease;
+}
+
+.vgrid [data-vgrid-drag-source] {
+    animation: vgrid-column-fade var(--vgrid-easing, 160ms) ease both;
+}
+
+@keyframes vgrid-column-fade {
+    to { opacity: .35; }
+}
+
+.vgrid [data-vgrid-dropped] {
+    animation: vgrid-column-drop calc(var(--vgrid-easing, 160ms) * 4) ease-out;
+}
+
+@keyframes vgrid-column-drop {
+    from { background-color: var(--vgrid-drop-color, color-mix(in srgb, AccentColor 22%, transparent)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vgrid-column-ghost,
+    .vgrid [data-vgrid-drag-source],
+    .vgrid [data-vgrid-dropped] {
+        animation-duration: 1ms;
+    }
+    .vgrid-column-marker {
+        transition-duration: 1ms;
+    }
+}
+
+.vgrid-filter td > * {
+    transition:
+        width var(--vgrid-easing, 160ms) cubic-bezier(.4, 0, .2, 1),
+        margin var(--vgrid-easing, 160ms) cubic-bezier(.4, 0, .2, 1),
+        box-shadow var(--vgrid-easing, 160ms) ease;
+}
+
+.vgrid-filter td > [data-vgrid-magnified] {
+    border-radius: var(--vgrid-border-radius, .25rem);
+    background-color: Canvas;
+    box-shadow: var(--vgrid-magnify-shadow, 0 .1em .25em rgba(0, 0, 0, .12), 0 .5em 1.4em rgba(0, 0, 0, .18));
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .vgrid-filter td > * {
+        transition-duration: 1ms;
+    }
+}
+
 .vgrid-filter input,
 .vgrid-filter select,
 .vgrid-rows-per-page select {
