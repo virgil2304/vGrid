@@ -1,4 +1,4 @@
-/* vGrid v1.0.547 */
+/* vGrid v1.0.550 */
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -97,13 +97,14 @@ function vGrid(config) {
   const sizePreset = sizePresets.includes(size) ? size : "medium";
   if (typeof striped !== "boolean") console.error("vGrid: striped must be true or false.");
   if (typeof hover !== "boolean") console.error("vGrid: hover must be true or false.");
-  const actionNames = ["clear", "download", "print", "refresh", "settings"];
+  const actionNames = ["clear", "download", "print", "refresh", "settings", "textSize"];
   const actionDefaults = {
     clear: { symbol: "\u2715", title: "Clear filters" },
     download: { symbol: "\u2913", title: "Download" },
     print: { symbol: "\u2912", title: "Print" },
     refresh: { symbol: "\u21BB", title: "Refresh" },
-    settings: { symbol: "\u2699\uFE0E", title: "Settings" }
+    settings: { symbol: "\u2699\uFE0E", title: "Settings" },
+    textSize: { decrease: "A\u2212", increase: "A+", decreaseTitle: "Smaller text", increaseTitle: "Larger text" }
   };
   const actionsPositions = ["caption", "bottom", "none", "external"];
   const actionsIsObject = actions !== null && typeof actions === "object" && !Array.isArray(actions);
@@ -165,12 +166,14 @@ function vGrid(config) {
     download: resolveAction("download", downloadMode !== null),
     print: resolveAction("print", print !== false && columns.length > 0),
     refresh: resolveAction("refresh", settingsActive),
-    settings: resolveAction("settings", settingsActive)
+    settings: resolveAction("settings", settingsActive),
+    textSize: resolveAction("textSize", true)
   };
   if (!columns.length) {
     resolvedActions.clear.active = false;
     resolvedActions.print.active = false;
     resolvedActions.settings.active = false;
+    resolvedActions.textSize.active = false;
   }
   if (!resolvedActions.download.active) downloadMode = null;
   const easingValue = Number(easing);
@@ -254,7 +257,9 @@ function vGrid(config) {
     sub.order = index;
   });
   const hasPanels = subgrids.length > 0;
-  const settingsStorageKey = `vgrid:${typeof el === "string" ? el : el?.id || ""}:${dataSource || ""}:columns`;
+  const storageKeyBase = `vgrid:${typeof el === "string" ? el : el?.id || ""}:${dataSource || ""}`;
+  const settingsStorageKey = `${storageKeyBase}:columns`;
+  const textSizeStorageKey = `${storageKeyBase}:textSize`;
   if (resolvedActions.settings.active) {
     try {
       const saved = JSON.parse(localStorage.getItem(settingsStorageKey));
@@ -594,14 +599,48 @@ function vGrid(config) {
     printButton = makeActionButton(resolvedActions.print);
     printButton.addEventListener("click", () => startPrint(), { signal });
   }
+  let textSizeButtons = [];
+  let currentSize = sizePreset;
+  if (resolvedActions.textSize.active) {
+    try {
+      const saved = localStorage.getItem(textSizeStorageKey);
+      if (sizePresets.includes(saved)) currentSize = saved;
+    } catch {
+    }
+    const textSizeConfig = resolvedActions.textSize;
+    const decreaseButton = makeActionButton({ className: textSizeConfig.className, title: textSizeConfig.decreaseTitle, symbol: textSizeConfig.decrease });
+    const increaseButton = makeActionButton({ className: textSizeConfig.className, title: textSizeConfig.increaseTitle, symbol: textSizeConfig.increase });
+    const syncTextSize = () => {
+      const index = sizePresets.indexOf(currentSize);
+      decreaseButton.disabled = index <= 0;
+      increaseButton.disabled = index >= sizePresets.length - 1;
+    };
+    const stepTextSize = (step) => {
+      const next = sizePresets[sizePresets.indexOf(currentSize) + step];
+      if (!next) return;
+      currentSize = next;
+      gridWrapper.dataset.vgridSize = currentSize;
+      syncTextSize();
+      paginationBars.forEach(layoutPagination);
+      try {
+        localStorage.setItem(textSizeStorageKey, currentSize);
+      } catch {
+      }
+    };
+    decreaseButton.addEventListener("click", () => stepTextSize(-1), { signal });
+    increaseButton.addEventListener("click", () => stepTextSize(1), { signal });
+    syncTextSize();
+    textSizeButtons = [decreaseButton, increaseButton];
+  }
   const actionElements = {
     clear: clearFiltersButton,
     download: downloadButton,
     print: printButton,
     refresh: refreshButton,
-    settings: settingsButton
+    settings: settingsButton,
+    textSize: textSizeButtons
   };
-  const actionButtons = actionsSequence.map((name) => actionElements[name]).filter(Boolean);
+  const actionButtons = actionsSequence.flatMap((name) => actionElements[name] ?? []);
   const externalActions = actionButtons.length > 0 && !!actionsElement;
   const inlineActions = actionButtons.length > 0 && !actionsElement && actionsPosition !== "none";
   const captionActions = inlineActions && actionsPosition !== "bottom";
@@ -625,7 +664,14 @@ function vGrid(config) {
     thead.appendChild(tr);
   }
   if (externalActions) actionsElement.replaceChildren(...actionButtons);
-  const infoEls = [], pagerEls = [], rowsPerPageSelects = [];
+  const infoEls = [], pagerEls = [], rowsPerPageSelects = [], paginationBars = [];
+  let pagerTotalPages = null;
+  const barObserver = new ResizeObserver((entries) => {
+    entries.forEach(({ target: target2 }) => {
+      const entry = paginationBars.find((item) => item.bar === target2);
+      if (entry && entry.width !== target2.clientWidth) layoutPagination(entry);
+    });
+  });
   const bindPager = (pager) => {
     pager.addEventListener("click", (event) => {
       const button = event.target.closest("button[data-vgrid-page]");
@@ -720,7 +766,12 @@ function vGrid(config) {
       label.appendChild(after);
       right.appendChild(label);
     }
-    td.append(left, document.createTextNode(" "), center, document.createTextNode(" "), right);
+    const bar = document.createElement("span");
+    bar.className = partClass("pagination-bar");
+    bar.append(left, center, right);
+    td.appendChild(bar);
+    paginationBars.push({ bar, pager: center, paged: showPagination, width: 0 });
+    barObserver.observe(bar);
     tr.appendChild(td);
     trackColSpan(td);
     return tr;
@@ -1890,7 +1941,7 @@ function vGrid(config) {
   const gridWrapper = document.createElement("div");
   gridWrapper.className = "vgrid-wrapper";
   gridWrapper.dataset.vgridBorders = borderPreset;
-  gridWrapper.dataset.vgridSize = sizePreset;
+  gridWrapper.dataset.vgridSize = currentSize;
   if (striped !== false) gridWrapper.dataset.vgridStriped = "1";
   if (hover !== false) gridWrapper.dataset.vgridHover = "1";
   gridWrapper.style.cssText = "display:block;position:relative;width:100%;overflow:hidden;";
@@ -1928,6 +1979,21 @@ function vGrid(config) {
   let filterTimer = null;
   let resizeState = null;
   let columnsFrozen = false;
+  let frozenWidths = null;
+  const writeColumnWidths = () => {
+    if (!columnsFrozen || !frozenWidths) return;
+    const widths = frozenWidths;
+    const tableWidth = element.clientWidth;
+    const toggleTotal = widths.reduce((sum, width, i) => sum + (isToggleCell(i) ? width : 0), 0);
+    const flexTotal = widths.reduce((sum, width, i) => sum + (isToggleCell(i) ? 0 : width), 0);
+    if (!flexTotal) return;
+    const share = tableWidth ? Math.max(0, tableWidth - toggleTotal) / tableWidth : 1;
+    columnCols.forEach((col, i) => {
+      col.style.width = isToggleCell(i) ? `${widths[i]}px` : `${widths[i] / flexTotal * share * 100}%`;
+    });
+  };
+  const columnObserver = new ResizeObserver(() => writeColumnWidths());
+  columnObserver.observe(element);
   let cursorHost = null;
   let suppressHeaderClick = false;
   let destroyed = false;
@@ -2015,7 +2081,7 @@ function vGrid(config) {
         infoEls.forEach((el2) => {
           el2.textContent = `Showing ${from}\u2013${to} of ${totalRows}`;
         });
-        pagerEls.forEach((el2) => renderPageButtons(el2, totalPages));
+        renderPagers(totalPages);
         onPage?.({ page: pageNo, rowsPerPage: pageSize, total: totalRows });
       }
       onReady?.({ total: totalRows, rows: rows.length });
@@ -2026,13 +2092,14 @@ function vGrid(config) {
       onReady?.({ error: err });
     });
   };
-  const pageRange = (current, total) => {
-    if (total <= 7) return Array.from({ length: total }, (_, i) => i + 1);
-    if (current <= 4) return [1, 2, 3, 4, 5, "\u2026", total];
-    if (current >= total - 3) return [1, "\u2026", total - 4, total - 3, total - 2, total - 1, total];
-    return [1, "\u2026", current - 1, current, current + 1, "\u2026", total];
+  const pageRange = (current, total, size2) => {
+    const run = (length, first) => Array.from({ length }, (_, i) => first + i);
+    if (total <= size2) return run(total, 1);
+    const start = Math.min(Math.max(current - Math.floor(size2 / 2), 1), total - size2 + 1);
+    const end = start + size2 - 1;
+    return [...start > 2 ? [1, "\u2026"] : start > 1 ? [1] : [], ...run(size2, start), ...end < total - 1 ? ["\u2026", total] : end < total ? [total] : []];
   };
-  const renderPageButtons = (pagerEl, totalPages) => {
+  const renderPageButtons = (pagerEl, totalPages, size2 = 7) => {
     pagerEl.innerHTML = "";
     const btn = (label, page, disabled, active, ariaLabel) => {
       const b = document.createElement("button");
@@ -2046,7 +2113,7 @@ function vGrid(config) {
     };
     pagerEl.appendChild(btn("\xAB", 1, currentPage === 1, false, "First page"));
     pagerEl.appendChild(btn("\u2039", currentPage - 1, currentPage === 1, false, "Previous page"));
-    pageRange(currentPage, totalPages).forEach((p) => {
+    pageRange(currentPage, totalPages, size2).forEach((p) => {
       if (p === "\u2026") {
         const span = document.createElement("span");
         span.className = partClass("pager-ellipsis");
@@ -2058,6 +2125,24 @@ function vGrid(config) {
     });
     pagerEl.appendChild(btn("\u203A", currentPage + 1, currentPage === totalPages, false, "Next page"));
     pagerEl.appendChild(btn("\xBB", totalPages, currentPage === totalPages, false, "Last page"));
+  };
+  const layoutPagination = (entry) => {
+    if (!entry.paged || pagerTotalPages === null) return;
+    const { bar, pager } = entry;
+    delete bar.dataset.vgridStacked;
+    renderPageButtons(pager, pagerTotalPages);
+    entry.width = bar.clientWidth;
+    if (bar.scrollWidth <= bar.clientWidth) return;
+    bar.dataset.vgridStacked = "1";
+    renderPageButtons(pager, pagerTotalPages, 5);
+  };
+  const renderPagers = (totalPages) => {
+    pagerTotalPages = totalPages;
+    const barPagers = new Set(paginationBars.map((entry) => entry.pager));
+    pagerEls.forEach((el2) => {
+      if (!barPagers.has(el2)) renderPageButtons(el2, totalPages);
+    });
+    paginationBars.forEach(layoutPagination);
   };
   const activeFilterValues = () => filterInputs.map((inp) => {
     const colIdx = parseInt(inp.dataset.col);
@@ -2104,7 +2189,7 @@ function vGrid(config) {
       infoEls.forEach((el2) => {
         el2.textContent = `Showing ${from}\u2013${to} of ${filtered.length}`;
       });
-      pagerEls.forEach((el2) => renderPageButtons(el2, totalPages));
+      renderPagers(totalPages);
       onPage?.({ page: currentPage, rowsPerPage: ps, total: filtered.length });
     }
   };
@@ -2301,6 +2386,7 @@ function vGrid(config) {
     buildExternalSortOptions();
     restoreFilterValues(keptFilters);
     columnsFrozen = false;
+    frozenWidths = null;
     element.style.tableLayout = "auto";
     setCursorHost(null);
     updateSortIndicators();
@@ -2314,11 +2400,9 @@ function vGrid(config) {
     freezeColumns();
   };
   const applyColumnWidths = (widths) => {
-    const total = widths.reduce((sum, width) => sum + width, 0);
-    if (!total) return;
-    columnCols.forEach((col, i) => {
-      col.style.width = `${widths[i] / total * 100}%`;
-    });
+    if (!widths.reduce((sum, width) => sum + width, 0)) return;
+    frozenWidths = widths.slice();
+    writeColumnWidths();
   };
   const pixelWidth = (value) => {
     if (typeof value === "number") return Number.isFinite(value) ? value : null;
@@ -2335,8 +2419,8 @@ function vGrid(config) {
     });
     headerCells.forEach((th) => th.removeAttribute("width"));
     element.style.tableLayout = "fixed";
-    applyColumnWidths(widths);
     columnsFrozen = true;
+    applyColumnWidths(widths);
   };
   const dividerIndexAt = (event) => {
     const index = headerCells.findIndex((th) => Math.abs(th.getBoundingClientRect().right - event.clientX) <= EDGE_TOLERANCE);
@@ -2350,13 +2434,14 @@ function vGrid(config) {
   const resizeColumns = (delta) => {
     const { index, widths } = resizeState;
     const next = widths.slice();
-    const room = (i) => Math.max(0, widths[i] - MIN_COLUMN_WIDTH);
+    const room = (i) => isToggleCell(i) ? 0 : Math.max(0, widths[i] - MIN_COLUMN_WIDTH);
+    const give = (i) => isToggleCell(i) ? 0 : widths[i];
     let available = 0;
-    for (let i = index + 1; i < widths.length; i++) available += delta > 0 ? room(i) : widths[i];
+    for (let i = index + 1; i < widths.length; i++) available += delta > 0 ? room(i) : give(i);
     const move = delta > 0 ? Math.min(delta, available) : Math.min(-delta, room(index));
     if (available > 0) {
       for (let i = index + 1; i < widths.length; i++) {
-        const share = (delta > 0 ? room(i) : widths[i]) / available;
+        const share = (delta > 0 ? room(i) : give(i)) / available;
         next[i] = widths[i] + (delta > 0 ? -share * move : share * move);
       }
     }
@@ -2451,6 +2536,10 @@ function vGrid(config) {
     columnCols.forEach((col, index) => {
       col.style.width = widths[index];
     });
+    if (frozenWidths) {
+      frozenWidths = permute(frozenWidths);
+      writeColumnWidths();
+    }
     syncSettingsOrder();
     return true;
   };
@@ -2696,6 +2785,9 @@ function vGrid(config) {
       infoEls.length = 0;
       pagerEls.length = 0;
       rowsPerPageSelects.length = 0;
+      barObserver.disconnect();
+      columnObserver.disconnect();
+      paginationBars.length = 0;
       loadingIndicator.remove();
       settingsPanel.remove();
       settingsButton?.remove();

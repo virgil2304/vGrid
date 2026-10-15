@@ -202,6 +202,11 @@
     outline-offset: 1px;
 }
 
+.vgrid-actions button:disabled {
+    color: GrayText;
+    cursor: default;
+}
+
 .vgrid-caption {
     font-weight: 700;
 }
@@ -447,22 +452,50 @@ button.vgrid-toggle-subgrid {
     outline-offset: 1px;
 }
 
+.vgrid-pagination-bar {
+    display: flex;
+    align-items: center;
+    gap: .25em .5em;
+}
+
 .vgrid-count {
+    flex: 1 1 0;
     color: GrayText;
+    white-space: nowrap;
 }
 
 .vgrid-rows-per-page {
-    float: right;
+    flex: 1 1 0;
+    text-align: right;
+    white-space: nowrap;
 }
 
 .vgrid-pager {
-    position: absolute;
-    left: 50%;
-    transform: translateX(-50%);
     display: inline-flex;
     align-items: center;
     gap: .15em;
     height: 1lh;
+}
+
+.vgrid-pagination-bar[data-vgrid-stacked] {
+    flex-wrap: wrap;
+}
+
+.vgrid-pagination-bar[data-vgrid-stacked] .vgrid-count,
+.vgrid-pagination-bar[data-vgrid-stacked] .vgrid-rows-per-page {
+    flex: 0 1 auto;
+}
+
+.vgrid-pagination-bar[data-vgrid-stacked] .vgrid-rows-per-page {
+    margin-left: auto;
+}
+
+.vgrid-pagination-bar[data-vgrid-stacked] .vgrid-pager {
+    order: 1;
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    justify-content: center;
+    height: auto;
 }
 
 .vgrid-pager button {
