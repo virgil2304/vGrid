@@ -184,6 +184,58 @@ When `dataSource` is set, vGrid requests rows with `fetch` using the configured 
 
 The core targets evergreen browsers. The settings panel and subgrid menus use the native Popover API, available in Chrome 114, Safari 17, Firefox 125 and later. DOM test environments such as jsdom do not implement it, so component tests that open these panels need a popover polyfill.
 
+## Browser compatibility
+
+This applies to the files in `dist/` and to the same code loaded through the npm entries. vGrid ships without polyfills or transpiled fallbacks. The minimum versions are set by the native Popover API (`popover`, `popovertarget`, `showPopover()`, `hidePopover()`, `:popover-open`, and the `toggle` event), which the settings panel, filter-mode menu, and subgrid menus require.
+
+| Browser | Minimum version | Released |
+|---|---|---|
+| Chrome (desktop and Android) | 114 | May 2023 |
+| Edge | 114 | June 2023 |
+| Firefox (desktop and Android) | 125 | April 2024 |
+| Safari (macOS) | 17.0 | September 2023 |
+| Safari on iOS and iPadOS | 17.0 | September 2023 |
+| Opera | 100 | June 2023 |
+| Samsung Internet | 23 | 2023 |
+| Other Chromium browsers (Brave, Vivaldi, Arc, ...) | Chromium 114 engine | 2023 |
+
+On iOS and iPadOS every browser uses WebKit, so Chrome, Firefox, and Edge there follow the Safari row: iOS 17 or later.
+
+Internet Explorer, legacy Edge (EdgeHTML), and Opera Mini are not supported. In browsers older than the versions above, the vGrid's panels and menus do not open and some interactions throw errors.
+
+All other features the vGrid relies on are older than the Popover API and need nothing extra in the listed versions. These include ES2020 syntax (`?.`, `??`), `fetch` with `AbortController`, `ResizeObserver`, Pointer Events with pointer capture, `replaceChildren()`, flexbox `gap`, `contain: inline-size`, and `Blob` downloads for export.
+
+Some styling is progressive enhancement. When a browser lacks the feature, the vGrid still works and only the visual detail differs:
+
+| Feature | Used for | When unsupported |
+|---|---|---|
+| `@starting-style`, `transition-behavior: allow-discrete`, `overlay` | Fade and slide when panels and menus open and close | Panels appear and disappear without animation. Currently this affects Firefox and Safari before 18; `overlay` is Chromium-only. |
+| `AccentColor` system color | Focus outline color | The browser's default focus ring is shown instead. |
+| `scrollbar-width`, `scrollbar-color` | Thin subgrid scrollbar | `::-webkit-scrollbar` rules style it instead in Safari and older Chromium. |
+| `prefers-reduced-motion` | Shortens transitions | Transitions run at normal speed. |
+
+## Framework compatibility
+
+| Framework | Supported versions | How to use | Notes |
+|---|---|---|---|
+| Plain JavaScript / HTML | Any | `vgrid`, `vgrid/browser`, or `dist/vgrid.min.js` | No dependencies. |
+| React | 18.x, 19.x | `vgrid/react` (`VGRID`) | Peer dependency `react@^18 \|\| ^19`. TypeScript needs `@types/react` 18 or 19. |
+| Next.js | 13.4+ (App Router and Pages Router) | `vgrid/react` | The adapter is marked `'use client'`. The grid renders on the client. |
+| Vue | 3.x | `vgrid/vue` (`vGrid`) | Peer dependency `vue@^3.0.0`. Vue 2 (including 2.7) is not supported. |
+| Nuxt | 3.x, 4.x | `vgrid/vue` | The grid renders on the client after mount. |
+| Angular | Any version that runs in the browser | Core `vGrid` | Create in `ngAfterViewInit`, call `destroy()` in `ngOnDestroy`. |
+| Svelte / SvelteKit | 3.x, 4.x, 5.x | Core `vGrid` | Create in `onMount`, call `destroy()` from its cleanup. |
+| Solid / SolidStart | 1.x | Core `vGrid` | Create in `onMount`, call `destroy()` in `onCleanup`. |
+| Alpine, Lit, jQuery, Laravel Blade, and others | Any | Core `vGrid` or a `<script>` tag | Pass a host element or selector. |
+
+| Tooling | Supported |
+|---|---|
+| Module formats | ES modules (`import`) and CommonJS (`require`) |
+| Bundlers | Vite, webpack 5, Rollup, esbuild, Parcel 2, and other bundlers that read the `exports` field |
+| TypeScript | 4.7+ with `moduleResolution` `node16` or `nodenext`; 5.0+ with `bundler` |
+| Node.js (SSR imports, tests) | 18+ |
+| Browsers | Chrome 114+, Safari 17+, Firefox 125+ (see [Browser compatibility](#browser-compatibility)) |
+
 ## Other frameworks and server rendering
 
 Angular, Svelte, Solid, and other frameworks can use the core `vGrid` export. Create the grid after its host element mounts in the browser, and call `destroy()` when that host is removed. Load the shared stylesheet globally so it applies to the grid's generated elements.
