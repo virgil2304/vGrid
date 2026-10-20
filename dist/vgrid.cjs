@@ -1,4 +1,4 @@
-/* vGrid v1.0.550 */
+/* vGrid v1.0.551 */
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -618,8 +618,14 @@ function vGrid(config) {
     const stepTextSize = (step) => {
       const next = sizePresets[sizePresets.indexOf(currentSize) + step];
       if (!next) return;
+      const before = parseFloat(getComputedStyle(gridWrapper).fontSize);
       currentSize = next;
       gridWrapper.dataset.vgridSize = currentSize;
+      const ratio = parseFloat(getComputedStyle(gridWrapper).fontSize) / before;
+      if (frozenWidths && Number.isFinite(ratio) && ratio > 0) {
+        frozenWidths = frozenWidths.map((width, i) => isToggleCell(i) ? width * ratio : width);
+        writeColumnWidths();
+      }
       syncTextSize();
       paginationBars.forEach(layoutPagination);
       try {
@@ -669,7 +675,11 @@ function vGrid(config) {
   const barObserver = new ResizeObserver((entries) => {
     entries.forEach(({ target: target2 }) => {
       const entry = paginationBars.find((item) => item.bar === target2);
-      if (entry && entry.width !== target2.clientWidth) layoutPagination(entry);
+      if (!entry || entry.frame || entry.width === target2.clientWidth) return;
+      entry.frame = requestAnimationFrame(() => {
+        entry.frame = 0;
+        if (!destroyed && entry.width !== target2.clientWidth) layoutPagination(entry);
+      });
     });
   });
   const bindPager = (pager) => {
@@ -770,7 +780,7 @@ function vGrid(config) {
     bar.className = partClass("pagination-bar");
     bar.append(left, center, right);
     td.appendChild(bar);
-    paginationBars.push({ bar, pager: center, paged: showPagination, width: 0 });
+    paginationBars.push({ bar, pager: center, paged: showPagination, width: 0, frame: 0 });
     barObserver.observe(bar);
     tr.appendChild(td);
     trackColSpan(td);
@@ -1588,7 +1598,7 @@ function vGrid(config) {
     close.title = "Close";
     close.setAttribute("aria-label", "Close");
     close.dataset.vgridClose = "1";
-    const entry = { panelRow, toggle, body, slide, clip, close, state: "opening", ready: false, observer: null, instance: null, fetchAbort: null, panel: null };
+    const entry = { panelRow, toggle, body, slide, clip, close, state: "opening", ready: false, observer: null, frame: 0, instance: null, fetchAbort: null, panel: null };
     sub.entries.set(tr, entry);
     panelOwners.set(panelRow, { sub, tr });
     clip.appendChild(body);
@@ -1599,7 +1609,13 @@ function vGrid(config) {
     (attached[attached.length - 1] || tr).after(panelRow);
     slide.style.height = "0px";
     showPanelContent(sub, entry, panel, row);
-    entry.observer = new ResizeObserver(() => syncPanelHeight(entry));
+    entry.observer = new ResizeObserver(() => {
+      if (entry.frame) return;
+      entry.frame = requestAnimationFrame(() => {
+        entry.frame = 0;
+        syncPanelHeight(entry);
+      });
+    });
     entry.observer.observe(clip);
     void slide.offsetHeight;
     entry.state = "open";
@@ -1979,6 +1995,8 @@ function vGrid(config) {
   let filterTimer = null;
   let resizeState = null;
   let columnsFrozen = false;
+  let freezePending = false;
+  let columnFrame = 0;
   let frozenWidths = null;
   const writeColumnWidths = () => {
     if (!columnsFrozen || !frozenWidths) return;
@@ -1992,7 +2010,17 @@ function vGrid(config) {
       col.style.width = isToggleCell(i) ? `${widths[i]}px` : `${widths[i] / flexTotal * share * 100}%`;
     });
   };
-  const columnObserver = new ResizeObserver(() => writeColumnWidths());
+  const columnObserver = new ResizeObserver(() => {
+    if (!freezePending) {
+      writeColumnWidths();
+      return;
+    }
+    if (columnFrame) return;
+    columnFrame = requestAnimationFrame(() => {
+      columnFrame = 0;
+      if (!destroyed && freezePending) freezeColumns();
+    });
+  });
   columnObserver.observe(element);
   let cursorHost = null;
   let suppressHeaderClick = false;
@@ -2191,6 +2219,12 @@ function vGrid(config) {
       });
       renderPagers(totalPages);
       onPage?.({ page: currentPage, rowsPerPage: ps, total: filtered.length });
+    }
+    if (onReady) {
+      const ready = { total: filtered.length, rows: currentRows.length };
+      queueMicrotask(() => {
+        if (!destroyed) onReady(ready);
+      });
     }
   };
   const downloadBaseName = () => `${namePrefix || "vgrid"}-${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}`;
@@ -2410,7 +2444,9 @@ function vGrid(config) {
     return /^\d+(\.\d+)?(px)?$/.test(text) ? parseFloat(text) : null;
   };
   const freezeColumns = () => {
-    if (columnsFrozen || !element.getBoundingClientRect().width) return;
+    if (columnsFrozen) return;
+    freezePending = !element.getBoundingClientRect().width;
+    if (freezePending) return;
     const widths = headerCells.map((th, i) => {
       const configured = pixelWidth(columnAtCell(i)?.width);
       const width = configured ?? th.getBoundingClientRect().width;
@@ -2421,6 +2457,7 @@ function vGrid(config) {
     element.style.tableLayout = "fixed";
     columnsFrozen = true;
     applyColumnWidths(widths);
+    paginationBars.forEach(layoutPagination);
   };
   const dividerIndexAt = (event) => {
     const index = headerCells.findIndex((th) => Math.abs(th.getBoundingClientRect().right - event.clientX) <= EDGE_TOLERANCE);
@@ -2786,7 +2823,9 @@ function vGrid(config) {
       pagerEls.length = 0;
       rowsPerPageSelects.length = 0;
       barObserver.disconnect();
+      paginationBars.forEach((entry) => cancelAnimationFrame(entry.frame));
       columnObserver.disconnect();
+      cancelAnimationFrame(columnFrame);
       paginationBars.length = 0;
       loadingIndicator.remove();
       settingsPanel.remove();

@@ -118,7 +118,7 @@
 }
 
 .vgrid-subgrid-close:hover {
-    background: ButtonFace;
+    background: color-mix(in srgb, currentColor 9%, Canvas);
 }
 
 .vgrid-subgrid-close:focus-visible {
@@ -133,7 +133,7 @@
     align-items: center;
     gap: .5em;
     padding: .5em .2em;
-    color: GrayText;
+    color: color-mix(in srgb, currentColor 60%, transparent);
 }
 
 .vgrid-panel-error {
@@ -142,7 +142,7 @@
 
 .vgrid-empty td {
     padding: .75em .4em;
-    color: GrayText;
+    color: color-mix(in srgb, currentColor 60%, transparent);
     text-align: center;
 }
 
@@ -189,11 +189,11 @@
 }
 
 .vgrid-actions button:hover {
-    background: ButtonFace;
+    background: color-mix(in srgb, currentColor 9%, Canvas);
 }
 
 .vgrid-actions button:active {
-    background: ButtonFace;
+    background: color-mix(in srgb, currentColor 9%, Canvas);
     filter: brightness(.95);
 }
 
@@ -203,7 +203,7 @@
 }
 
 .vgrid-actions button:disabled {
-    color: GrayText;
+    color: color-mix(in srgb, currentColor 60%, transparent);
     cursor: default;
 }
 
@@ -258,7 +258,7 @@ button.vgrid-toggle-subgrid {
     inset: auto;
     box-sizing: border-box;
     min-width: 10em;
-    max-width: 20em;
+    max-width: min(20em, calc(100vw - 8px));
     max-height: 60vh;
     margin: 0;
     padding: .25em 0;
@@ -312,7 +312,7 @@ button.vgrid-toggle-subgrid {
 .vgrid-filter-mode-menu,
 .vgrid-subgrid-body {
     scrollbar-width: thin;
-    scrollbar-color: var(--vgrid-scrollbar-color, GrayText) transparent;
+    scrollbar-color: var(--vgrid-scrollbar-color, color-mix(in srgb, currentColor 45%, transparent)) transparent;
 }
 
 .vgrid-settings::-webkit-scrollbar,
@@ -334,7 +334,7 @@ button.vgrid-toggle-subgrid {
 .vgrid-panel-menu::-webkit-scrollbar-thumb,
 .vgrid-filter-mode-menu::-webkit-scrollbar-thumb,
 .vgrid-subgrid-body::-webkit-scrollbar-thumb {
-    background: var(--vgrid-scrollbar-color, GrayText);
+    background: var(--vgrid-scrollbar-color, color-mix(in srgb, currentColor 45%, transparent));
     background-clip: padding-box;
     border: .2em solid transparent;
     border-radius: 1em;
@@ -360,7 +360,7 @@ button.vgrid-toggle-subgrid {
 .vgrid-panel-menu-item:focus-visible,
 .vgrid-filter-mode-item:hover,
 .vgrid-filter-mode-item:focus-visible {
-    background: ButtonFace;
+    background: color-mix(in srgb, currentColor 9%, Canvas);
 }
 
 .vgrid-panel-menu-item:focus-visible,
@@ -377,8 +377,10 @@ button.vgrid-toggle-subgrid {
 .vgrid-settings {
     position: fixed;
     inset: auto;
+    box-sizing: border-box;
     margin: 0;
-    min-width: 12em;
+    min-width: min(12em, calc(100vw - 8px));
+    max-width: calc(100vw - 8px);
     max-height: 80vh;
     padding: .6em .7em;
     overflow: auto;
@@ -443,7 +445,7 @@ button.vgrid-toggle-subgrid {
 
 .vgrid-settings-close:hover,
 .vgrid-settings-actions button:hover {
-    background: ButtonFace;
+    background: color-mix(in srgb, currentColor 9%, Canvas);
 }
 
 .vgrid-settings-close:focus-visible,
@@ -460,7 +462,7 @@ button.vgrid-toggle-subgrid {
 
 .vgrid-count {
     flex: 1 1 0;
-    color: GrayText;
+    color: color-mix(in srgb, currentColor 60%, transparent);
     white-space: nowrap;
 }
 
@@ -510,17 +512,17 @@ button.vgrid-toggle-subgrid {
 }
 
 .vgrid-pager button:hover:not(:disabled) {
-    background: ButtonFace;
+    background: color-mix(in srgb, currentColor 9%, Canvas);
 }
 
 .vgrid-pager button:disabled {
-    color: GrayText;
+    color: color-mix(in srgb, currentColor 60%, transparent);
     cursor: default;
 }
 
 .vgrid-pager button[aria-current="page"] {
     font-weight: 700;
-    background: ButtonFace;
+    background: color-mix(in srgb, currentColor 9%, Canvas);
 }
 
 .vgrid-pager button:focus-visible {
@@ -656,6 +658,12 @@ button.vgrid-toggle-subgrid {
 .vgrid-rows-per-page select {
     border: var(--vgrid-border-width, 1px) solid var(--vgrid-border-color, #dee2e6);
     border-radius: var(--vgrid-border-radius, .25rem);
+}
+
+.vgrid-filter select,
+.vgrid-rows-per-page select {
+    background-color: Field;
+    color: FieldText;
 }
 
 .vgrid tr > :first-child {
