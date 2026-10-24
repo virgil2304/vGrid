@@ -1,4 +1,4 @@
-/* vGrid v1.0.0.5.52 | Last updated: 2026-10-24 */
+/* vGrid v1.0.0.5.53 | Last updated: 2026-10-24 */
 export function vGrid(config) {
 
     const { el, caption, columns: columnsConfig = [], data = [], dataSource, method = 'GET', headers = {},
@@ -378,6 +378,20 @@ export function vGrid(config) {
 
     const element = target.tagName === 'TABLE' ? target : document.createElement('table');
     const createdTable = element !== target;
+    const originalAriaDescribedBy = element.getAttribute('aria-describedby');
+    const hasSortableColumns = columns.some(column => column.sort !== false);
+    let sortInstructions = null;
+    if (hasSortableColumns) {
+        sortInstructions = document.createElement('span');
+        let id = 'vgrid-sort-instructions';
+        for (let suffix = 1; document.getElementById(id); suffix++) id = `vgrid-sort-instructions-${suffix}`;
+        sortInstructions.id = id;
+        sortInstructions.textContent = 'Sortable column headings are buttons. Activate a heading to sort; the current direction is announced with the heading.';
+        sortInstructions.style.cssText = 'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;';
+        const describedBy = new Set((originalAriaDescribedBy || '').split(/\s+/).filter(Boolean));
+        describedBy.add(id);
+        element.setAttribute('aria-describedby', [...describedBy].join(' '));
+    }
     if (createdTable) target.replaceChildren(element);
     element.classList.add('vgrid');
     element.border = '1';
@@ -819,16 +833,26 @@ export function vGrid(config) {
         }
         activeColumns.forEach((col, i) => {
             const th = document.createElement('th');
-            th.textContent = col.label || col.name;
+            const label = col.label || col.name;
+            th.textContent = label;
             th.scope = 'col';
             if (col.width) th.width = String(col.width);
             if (col.sort !== false) {
-                th.title = `Sort by ${th.textContent}`;
+                th.title = `Sort by ${label}`;
                 th.dataset.vgridSort = String(i);
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.style.cssText = 'display:block;width:100%;box-sizing:border-box;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;';
+                button.appendChild(document.createTextNode(label));
+                const indicator = document.createElement('span');
+                indicator.dataset.vgridSortIndicator = '1';
+                indicator.setAttribute('aria-hidden', 'true');
+                button.appendChild(indicator);
+                th.replaceChildren(button);
             }
             cells.push(clipCell(th));
             columnHeaders.push(th);
-            columnHeaderLabels.push(th.textContent);
+            columnHeaderLabels.push(label);
         });
         if (hasPanels) {
             placeToggleCells(cells, () => {
@@ -2021,6 +2045,7 @@ export function vGrid(config) {
     gridWrapper.style.setProperty('--vgrid-easing', `${easingMs}ms`);
     element.replaceWith(gridWrapper);
     gridWrapper.appendChild(element);
+    if (sortInstructions) gridWrapper.appendChild(sortInstructions);
     gridWrapper.appendChild(settingsPanel);
     subgrids.forEach(sub => gridWrapper.appendChild(sub.menu));
     if (filterRowElement) gridWrapper.appendChild(filterModeMenu.menu);
@@ -2482,8 +2507,10 @@ export function vGrid(config) {
     const updateSortIndicators = () => {
         columnHeaders.forEach((th, i) => {
             const active = i === sortColIndex;
-            th.setAttribute('aria-sort', active ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none');
-            th.textContent = active ? `${columnHeaderLabels[i]} ${sortOrder === 'asc' ? '▲' : '▼'}` : columnHeaderLabels[i];
+            if (th.hasAttribute('data-vgrid-sort')) th.setAttribute('aria-sort', active ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none');
+            else th.removeAttribute('aria-sort');
+            const indicator = th.querySelector('[data-vgrid-sort-indicator]');
+            if (indicator) indicator.textContent = active ? ` ${sortOrder === 'asc' ? '▲' : '▼'}` : '';
         });
     };
 
@@ -2928,6 +2955,11 @@ export function vGrid(config) {
             cancelAnimationFrame(columnFrame);
             paginationBars.length = 0;
             loadingIndicator.remove();
+            sortInstructions?.remove();
+            if (sortInstructions) {
+                if (originalAriaDescribedBy === null) element.removeAttribute('aria-describedby');
+                else element.setAttribute('aria-describedby', originalAriaDescribedBy);
+            }
             settingsPanel.remove();
             settingsButton?.remove();
             refreshButton?.remove();
