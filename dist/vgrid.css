@@ -441,6 +441,32 @@ button.vgrid-toggle-subgrid {
     cursor: pointer;
 }
 
+.vgrid-actions button,
+.vgrid-pager button,
+.vgrid-rows-per-page select,
+.vgrid-header th button,
+.vgrid-filter input,
+.vgrid-filter select,
+.vgrid-filter-clear,
+.vgrid-filter-mode,
+.vgrid-filter-mode-item,
+.vgrid-panel-menu-item,
+.vgrid-settings-close,
+.vgrid-settings-column button,
+.vgrid-settings-actions button,
+.vgrid-toggle-subgrid,
+.vgrid-subgrid-close,
+.vgrid-row-actions button,
+.vgrid-row-reorder button {
+    min-width: 24px;
+    min-height: 24px;
+    box-sizing: border-box;
+}
+
+.vgrid-settings-column button {
+    padding: 0 .3em;
+}
+
 .vgrid-settings-actions {
     display: flex;
     gap: .35em;
@@ -515,7 +541,7 @@ button.vgrid-toggle-subgrid {
 }
 
 .vgrid-pager button {
-    min-width: 1.9em;
+    min-width: max(1.9em, 24px);
     padding: 0 .35em;
     line-height: 1.25;
     color: inherit;

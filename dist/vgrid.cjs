@@ -1,4 +1,4 @@
-/* vGrid v1.0.561 */
+/* vGrid v1.0.563 */
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -63,6 +63,7 @@ function vGrid(config) {
     rowActions = false,
     rowReorder = false,
     cellSelection = false,
+    rowClass,
     onSort,
     onFilter,
     onPage,
@@ -80,6 +81,37 @@ function vGrid(config) {
   if (rowActions && !hasRowActions) console.error("vGrid: rowActions must be an array, a function, or false.");
   if (rowReorder !== true && rowReorder !== false) console.error("vGrid: rowReorder must be true or false.");
   if (cellSelection !== true && cellSelection !== false) console.error("vGrid: cellSelection must be true or false.");
+  if (rowClass !== void 0 && typeof rowClass !== "function") console.error("vGrid: rowClass must be a function.");
+  const rowClassOf = typeof rowClass === "function" ? rowClass : null;
+  columns.forEach((col) => {
+    if (col.render !== void 0 && typeof col.render !== "function") console.error(`vGrid: render on column "${col.name}" must be a function.`);
+    if (col.href !== void 0 && (typeof col.href !== "string" || !col.href.trim())) console.error(`vGrid: href on column "${col.name}" must be a row field name.`);
+  });
+  const renderOf = (col) => typeof col.render === "function" ? col.render : null;
+  const hrefFieldOf = (col) => typeof col.href === "string" && col.href.trim() ? col.href.trim() : "link";
+  const renderFailures = /* @__PURE__ */ new Set();
+  const reportRender = (col, detail) => {
+    if (renderFailures.has(col)) return;
+    renderFailures.add(col);
+    console.error(`vGrid: render on column "${col.name}" ${detail}`);
+  };
+  const renderResult = (row, col, value) => {
+    const render2 = renderOf(col);
+    if (!render2) return void 0;
+    let result;
+    try {
+      result = render2(value, row);
+    } catch (error) {
+      reportRender(col, `failed: ${error?.message || error}`);
+      return String(value);
+    }
+    if (result === void 0) return void 0;
+    if (result === null) return "";
+    if (typeof result === "string" || typeof result === "number") return String(result);
+    if (typeof Node !== "undefined" && result instanceof Node) return result;
+    reportRender(col, "must return text or a DOM node.");
+    return String(value);
+  };
   const toPageSize = (value) => {
     const size2 = parseInt(value);
     return Number.isFinite(size2) && size2 > 0 ? size2 : null;
@@ -527,9 +559,6 @@ function vGrid(config) {
     else button.textContent = config2.symbol ?? "";
     const accessibleLabel = config2.ariaLabel ?? config2.label ?? config2.title;
     if (accessibleLabel) button.setAttribute("aria-label", String(accessibleLabel));
-    button.style.minWidth = "24px";
-    button.style.minHeight = "24px";
-    button.style.boxSizing = "border-box";
     return button;
   };
   if (resolvedActions.clear.active) {
@@ -559,9 +588,6 @@ function vGrid(config) {
     settingsClose.textContent = "\xD7";
     settingsClose.title = "Close";
     settingsClose.setAttribute("aria-label", "Close");
-    settingsClose.style.minWidth = "24px";
-    settingsClose.style.minHeight = "24px";
-    settingsClose.style.boxSizing = "border-box";
     settingsClose.setAttribute("popovertarget", settingsPanel.id);
     settingsClose.setAttribute("popovertargetaction", "hide");
     settingsPanel.appendChild(settingsClose);
@@ -576,10 +602,6 @@ function vGrid(config) {
       button.textContent = text;
       button.title = label;
       button.setAttribute("aria-label", label);
-      button.style.minWidth = "24px";
-      button.style.minHeight = "24px";
-      button.style.boxSizing = "border-box";
-      button.style.padding = "0 .3em";
       return button;
     };
     columns.forEach((col, index) => {
@@ -655,14 +677,10 @@ function vGrid(config) {
     const applyButton = document.createElement("button");
     applyButton.type = "button";
     applyButton.textContent = "Apply";
-    applyButton.style.minWidth = "24px";
-    applyButton.style.minHeight = "24px";
     applyButton.addEventListener("click", applyPending, { signal });
     const saveButton = document.createElement("button");
     saveButton.type = "button";
     saveButton.textContent = "Save";
-    saveButton.style.minWidth = "24px";
-    saveButton.style.minHeight = "24px";
     saveButton.addEventListener("click", () => {
       applyPending();
       const preference = {};
@@ -976,6 +994,15 @@ function vGrid(config) {
     headerRow.replaceChildren(...cells);
   };
   buildHeaderRow();
+  headerRow.addEventListener("keydown", (event) => {
+    if (!event.altKey || event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    const th = event.target.closest("th[data-vgrid-sort]");
+    if (!th || th.parentNode !== headerRow) return;
+    const column = activeColumns[parseInt(th.dataset.vgridSort)];
+    if (!column) return;
+    event.preventDefault();
+    resizeColumnBy(column, event.key === "ArrowRight" ? 10 : -10);
+  }, { signal });
   headerRow.addEventListener("click", (event) => {
     const th = event.target.closest("th[data-vgrid-sort]");
     if (!th || th.parentNode !== headerRow) return;
@@ -1134,9 +1161,6 @@ function vGrid(config) {
     button.style.bottom = "0";
     button.style.right = isSelect ? "1.2em" : "0";
     button.style.width = "24px";
-    button.style.minWidth = "24px";
-    button.style.minHeight = "24px";
-    button.style.boxSizing = "border-box";
     button.style.padding = "0";
     button.style.border = "0";
     button.style.background = "none";
@@ -1156,7 +1180,6 @@ function vGrid(config) {
     input.type = "text";
     input.placeholder = col.label || col.name;
     input.setAttribute("aria-label", `Filter by ${col.label || col.name}`);
-    input.style.minHeight = "24px";
     input.dataset.col = String(i);
     return input;
   };
@@ -1212,7 +1235,6 @@ function vGrid(config) {
       item.setAttribute("aria-checked", mode === current ? "true" : "false");
       item.title = mode.text;
       item.dataset.vgridFilterModeKey = mode.key;
-      item.style.minHeight = "24px";
       if (mode.symbol) {
         const symbol = document.createElement("span");
         symbol.className = partClass("filter-mode-symbol");
@@ -1277,7 +1299,6 @@ function vGrid(config) {
           const select = document.createElement("select");
           select.className = partClass(`filter-${col.name}`);
           select.setAttribute("aria-label", `Filter by ${col.label || col.name}`);
-          select.style.minHeight = "24px";
           select.dataset.col = String(i);
           (col.filterOptions || "").split(";").forEach((pair) => {
             const sep = pair.indexOf(":");
@@ -1494,8 +1515,8 @@ function vGrid(config) {
   }
   let loadingIndicator, loadingBadge, loadingSpinner, loadingText, loadingShowTimer;
   const isSafeHref = (href) => {
-    if (!href) return false;
-    if (href.startsWith("/")) return true;
+    if (!href || typeof href !== "string") return false;
+    if (href.startsWith("/")) return href[1] !== "/" && href[1] !== "\\";
     try {
       const url = new URL(href, window.location.origin);
       return url.protocol === "http:" || url.protocol === "https:";
@@ -1553,9 +1574,6 @@ function vGrid(config) {
     if (node) {
       node.classList.add(...toggleClasses);
       node.dataset.vgridToggle = String(sub.order);
-      node.style.minWidth = "24px";
-      node.style.minHeight = "24px";
-      node.style.boxSizing = "border-box";
       if (opensMenu) {
         node.dataset.vgridMenu = "1";
         node.setAttribute("aria-haspopup", "menu");
@@ -1565,9 +1583,6 @@ function vGrid(config) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = toggleClasses.join(" ");
-    button.style.minWidth = "24px";
-    button.style.minHeight = "24px";
-    button.style.boxSizing = "border-box";
     button.dataset.vgridToggle = String(sub.order);
     if (opensMenu) {
       button.dataset.vgridMenu = "1";
@@ -1779,9 +1794,6 @@ function vGrid(config) {
     close.textContent = "\xD7";
     close.title = "Close";
     close.setAttribute("aria-label", "Close");
-    close.style.minWidth = "24px";
-    close.style.minHeight = "24px";
-    close.style.boxSizing = "border-box";
     close.dataset.vgridClose = "1";
     const entry = { panelRow, toggle, body, slide, clip, close, state: "opening", ready: false, observer: null, frame: 0, instance: null, fetchAbort: null, panel: null };
     sub.entries.set(tr, entry);
@@ -1838,7 +1850,6 @@ function vGrid(config) {
     if (selectable) item.setAttribute("aria-checked", current ? "true" : "false");
     item.textContent = text;
     item.title = text;
-    item.style.minHeight = "24px";
     return item;
   };
   const availablePanels = (sub, row) => sub.panels.filter((panel) => panelValue(panel, row) !== "");
@@ -2002,8 +2013,13 @@ function vGrid(config) {
     }, { signal });
   }
   const htmlText = document.createElement("template");
-  const cellText = (row, col) => {
+  const cellText = (row, col, rendered = false) => {
     const value = row[col.name] ?? "";
+    if (rendered) {
+      const result = renderResult(row, col, value);
+      if (typeof result === "string") return result;
+      if (result !== void 0) return result.textContent ?? "";
+    }
     if (col.type === "html") {
       htmlText.innerHTML = value;
       const text = htmlText.content.textContent;
@@ -2038,6 +2054,8 @@ function vGrid(config) {
       tbody.appendChild(emptyRow());
       return;
     }
+    renderFailures.clear();
+    let rowClassFailed = false;
     rows.forEach((row, index) => {
       const tr = document.createElement("tr");
       if (cellSelectionActive) tr.setAttribute("role", "row");
@@ -2046,6 +2064,15 @@ function vGrid(config) {
         tr.dataset.vgridClickable = "1";
       }
       tr.className = partClass("row", row.id !== void 0 && namePrefix ? `${namePrefix}-row-${row.id}` : "");
+      if (rowClassOf) {
+        try {
+          const extra = rowClassOf(row);
+          if (extra) tr.classList.add(...String(extra).split(/\s+/).filter(Boolean));
+        } catch (error) {
+          if (!rowClassFailed) console.error(`vGrid: rowClass failed: ${error?.message || error}`);
+          rowClassFailed = true;
+        }
+      }
       if (index % 2 === 0) tr.dataset.vgridStripe = "1";
       rowData.set(tr, row);
       const cells = [];
@@ -2057,9 +2084,14 @@ function vGrid(config) {
       activeColumns.forEach((col) => {
         const td = document.createElement("td");
         const value = row[col.name] ?? "";
-        if (col.type === "link" && isSafeHref(row.link)) {
+        const rendered = renderResult(row, col, value);
+        const href = row[hrefFieldOf(col)];
+        if (rendered !== void 0) {
+          if (typeof rendered === "string") td.textContent = rendered;
+          else td.appendChild(rendered);
+        } else if (col.type === "link" && isSafeHref(href)) {
           const a = document.createElement("a");
-          a.href = row.link;
+          a.href = href;
           a.textContent = value;
           td.appendChild(a);
         } else if (col.type === "html") {
@@ -2094,11 +2126,6 @@ function vGrid(config) {
         down.title = "Move row later";
         down.setAttribute("aria-label", `Move ${rowActionDescription(row)} row later`);
         down.dataset.vgridRowReorder = "down";
-        [up, down].forEach((button) => {
-          button.style.minWidth = "24px";
-          button.style.minHeight = "24px";
-          button.style.boxSizing = "border-box";
-        });
         const dataIndex = !isRemote ? localData.indexOf(row) : offset + index;
         const canMove = !isRemote ? canReorderRows() : typeof onRowReorder === "function";
         up.disabled = !canMove || dataIndex <= 0;
@@ -2119,9 +2146,6 @@ function vGrid(config) {
           button.textContent = String(action.label ?? "Action");
           button.setAttribute("aria-label", String(action.ariaLabel ?? action.label ?? "Action"));
           button.disabled = action.disabled === true;
-          button.style.minWidth = "24px";
-          button.style.minHeight = "24px";
-          button.style.boxSizing = "border-box";
           button.dataset.vgridRowAction = name;
           rowActionHandlers.set(button, { row, action, name });
           td.appendChild(button);
@@ -2594,9 +2618,6 @@ function vGrid(config) {
       if (ariaLabel) b.setAttribute("aria-label", ariaLabel);
       b.disabled = disabled;
       b.dataset.vgridPage = String(page);
-      b.style.minWidth = "24px";
-      b.style.minHeight = "24px";
-      b.style.boxSizing = "border-box";
       return b;
     };
     pagerEl.appendChild(btn("\xAB", 1, currentPage === 1, false, "First page"));
@@ -2717,7 +2738,7 @@ function vGrid(config) {
     const body = rows.map((row) => activeColumns.map((col) => {
       const value = row[col.name] ?? "";
       const isNumeric = typeof value === "number" && Number.isFinite(value) && (!col.type || col.type === "number" || col.type === "currency");
-      return csvValue(cellText(row, col), isNumeric);
+      return csvValue(cellText(row, col, true), isNumeric);
     }));
     const csv = "\uFEFF" + [head, ...body].map((line) => line.join(",")).join("\r\n");
     saveBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${downloadBaseName()}.csv`);
@@ -2812,7 +2833,7 @@ function vGrid(config) {
       row.appendChild(numberCell);
       activeColumns.forEach((col) => {
         const td = doc.createElement("td");
-        td.textContent = cellText(data2, col).replace(/\s+/g, " ").trim();
+        td.textContent = cellText(data2, col, true).replace(/\s+/g, " ").trim();
         row.appendChild(td);
       });
       body.appendChild(row);
