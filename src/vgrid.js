@@ -1,4 +1,4 @@
-/* vGrid v1.0.0.5.58 | Last updated: 2026-10-24 */
+/* vGrid v1.0.0.5.60 | Last updated: 2026-10-24 */
 export function vGrid(config) {
 
     const { el, caption, columns: columnsConfig = [], data = [], dataSource, method = 'GET', headers = {},
@@ -271,6 +271,7 @@ export function vGrid(config) {
     let currentOffset = 0;
     let remoteTotal = null;
     const rowData = new WeakMap();
+    const rowActionHandlers = new WeakMap();
     const panelOwners = new WeakMap();
 
     const isRemote = !!dataSource;
@@ -2166,10 +2167,7 @@ export function vGrid(config) {
                     button.style.minHeight = '24px';
                     button.style.boxSizing = 'border-box';
                     button.dataset.vgridRowAction = '1';
-                    button.addEventListener('click', event => {
-                        event.stopPropagation();
-                        action.onClick({ row, event, grid: instance });
-                    }, { signal });
+                    rowActionHandlers.set(button, { row, action });
                     td.appendChild(button);
                 });
                 cells.push(td);
@@ -2209,18 +2207,24 @@ export function vGrid(config) {
 
     let cellSelectionAnchor = null;
     let cellSelectionFocus = null;
-    const visibleCell = (rowIndex, columnIndex) => tbody.querySelector(`[data-vgrid-cell-row="${rowIndex}"][data-vgrid-cell-column="${columnIndex}"]`);
+    const ownCells = () => tbody.querySelectorAll(':scope > tr > [data-vgrid-cell-row]');
+    const ownCell = target => {
+        const cell = target instanceof Element ? target.closest('[data-vgrid-cell-row]') : null;
+        return cell && cell.parentElement?.parentElement === tbody ? cell : null;
+    };
+    const visibleCell = (rowIndex, columnIndex) => tbody.querySelector(`:scope > tr > [data-vgrid-cell-row="${rowIndex}"][data-vgrid-cell-column="${columnIndex}"]`);
     const updateCellSelection = () => {
         if (!cellSelectionAnchor || !cellSelectionFocus) return;
         const rowStart = Math.min(cellSelectionAnchor.row, cellSelectionFocus.row);
         const rowEnd = Math.max(cellSelectionAnchor.row, cellSelectionFocus.row);
         const colStart = Math.min(cellSelectionAnchor.column, cellSelectionFocus.column);
         const colEnd = Math.max(cellSelectionAnchor.column, cellSelectionFocus.column);
-        tbody.querySelectorAll('[data-vgrid-cell-row]').forEach(cell => {
+        const focused = visibleCell(cellSelectionFocus.row, cellSelectionFocus.column);
+        ownCells().forEach(cell => {
             const row = Number(cell.dataset.vgridCellRow);
             const column = Number(cell.dataset.vgridCellColumn);
             cell.setAttribute('aria-selected', String(row >= rowStart && row <= rowEnd && column >= colStart && column <= colEnd));
-            cell.tabIndex = cell === visibleCell(cellSelectionFocus.row, cellSelectionFocus.column) ? 0 : -1;
+            cell.tabIndex = cell === focused ? 0 : -1;
         });
     };
     const selectCell = (cell, extend = false) => {
@@ -2233,11 +2237,11 @@ export function vGrid(config) {
     if (cellSelectionActive) {
         tbody.addEventListener('click', event => {
             if (event.target.closest('a, button, input, select')) return;
-            const cell = event.target.closest('[data-vgrid-cell-row]');
+            const cell = ownCell(event.target);
             if (cell) selectCell(cell);
         }, { signal });
         tbody.addEventListener('focusin', event => {
-            const cell = event.target.closest('[data-vgrid-cell-row]');
+            const cell = ownCell(event.target);
             if (!cell) return;
             if (!cellSelectionFocus || visibleCell(cellSelectionFocus.row, cellSelectionFocus.column) !== cell) {
                 cellSelectionAnchor = { row: Number(cell.dataset.vgridCellRow), column: Number(cell.dataset.vgridCellColumn) };
@@ -2246,8 +2250,8 @@ export function vGrid(config) {
             }
         }, { signal });
         tbody.addEventListener('keydown', event => {
-            const cell = event.target.closest('[data-vgrid-cell-row]');
-            if (!cell) return;
+            const cell = ownCell(event.target);
+            if (!cell || event.target.closest('input, select, textarea, [contenteditable]')) return;
             const delta = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[event.key];
             if (!delta) return;
             const row = Number(cell.dataset.vgridCellRow) + delta[0];
@@ -2263,7 +2267,7 @@ export function vGrid(config) {
             }
         }, { signal });
         element.addEventListener('copy', event => {
-            if (!cellSelectionFocus || !event.clipboardData || !document.activeElement.closest?.('[data-vgrid-cell-row]')) return;
+            if (!cellSelectionFocus || !event.clipboardData || !ownCell(document.activeElement)) return;
             const rowStart = Math.min(cellSelectionAnchor.row, cellSelectionFocus.row);
             const rowEnd = Math.max(cellSelectionAnchor.row, cellSelectionFocus.row);
             const colStart = Math.min(cellSelectionAnchor.column, cellSelectionFocus.column);
@@ -2303,6 +2307,12 @@ export function vGrid(config) {
                 || tbody.querySelector('[data-vgrid-row-reorder]');
             focusButton?.focus();
             announceResultCount(`Moved row from position ${from + 1} to ${to + 1}.`);
+            return;
+        }
+        const actionButton = event.target.closest('[data-vgrid-row-action]');
+        if (actionButton) {
+            const handler = rowActionHandlers.get(actionButton);
+            if (handler) handler.action.onClick({ row: handler.row, event, grid: instance });
             return;
         }
         const interactive = event.target.closest('button, a, input, select, textarea');
@@ -2475,13 +2485,11 @@ export function vGrid(config) {
         window.addEventListener('scroll', destroyWhenDetached, { signal, capture: true });
     }
 
-    let sortColIndex = sortBy ? activeColumns.findIndex(c => c.name === sortBy.column) : null;
-    let sortOrder    = sortBy ? (sortBy.order || 'asc') : null;
     let sortCriteria = (Array.isArray(sortBy) ? sortBy : sortBy ? [sortBy] : [])
         .filter(sort => sort && typeof sort.column === 'string' && activeColumns.some(column => column.name === sort.column && column.sort !== false))
         .map(sort => ({ column: sort.column, order: sort.order === 'desc' ? 'desc' : 'asc' }));
-    sortColIndex = sortCriteria.length ? activeColumns.findIndex(column => column.name === sortCriteria[0].column) : null;
-    sortOrder = sortCriteria[0]?.order ?? null;
+    let sortColIndex = sortCriteria.length ? activeColumns.findIndex(column => column.name === sortCriteria[0].column) : null;
+    let sortOrder    = sortCriteria[0]?.order ?? null;
     let currentPage  = 1;
     let fetchAbort   = null;
     let filterTimer  = null;
@@ -2602,8 +2610,7 @@ export function vGrid(config) {
                 const totalRows = reportedTotal ?? rows.length;
                 remoteTotal = totalIsKnown ? reportedTotal : null;
                 const pageSize  = Number.isInteger(toCount(ps2)) && toCount(ps2) > 0 ? toCount(ps2) : null;
-                const requestedPageSize = toPageSize(payload.limit) || currentPageSize();
-                const rowPageSize = pageSize || requestedPageSize || null;
+                const rowPageSize = pageSize || currentPageSize() || null;
                 const responsePage = toCount(pg);
                 const pageNo = Number.isInteger(responsePage) && responsePage > 0 ? responsePage : currentPage;
                 currentPage = pageNo;
@@ -3380,6 +3387,7 @@ export function vGrid(config) {
             if (destroyed) return instance;
             const idx = activeColumns.findIndex(c => c.name === column);
             if (idx === -1) { console.warn(`vGrid: column "${column}" not found`); return instance; }
+            if (activeColumns[idx].sort === false) { console.warn(`vGrid: column "${column}" is not sortable`); return instance; }
             sortColIndex = idx;
             sortOrder = order === 'desc' ? 'desc' : 'asc';
             sortCriteria = [{ column, order: sortOrder }];
