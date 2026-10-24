@@ -173,9 +173,17 @@
 
 .vgrid-actions {
     display: inline-flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
     align-items: center;
     gap: .25em;
-    height: 1lh;
+    max-width: 100%;
+    min-height: 1lh;
+}
+
+.vgrid-wrapper:focus-visible {
+    outline: 2px solid AccentColor;
+    outline-offset: 1px;
 }
 
 .vgrid-actions button {
@@ -395,9 +403,11 @@ button.vgrid-toggle-subgrid {
     margin: 0;
     min-width: min(12em, calc(100vw - 8px));
     max-width: calc(100vw - 8px);
-    max-height: 80vh;
+    max-height: calc(100vh - 8px);
+    max-height: calc(100dvh - 8px);
     padding: .6em .7em;
-    overflow: auto;
+    flex-direction: column;
+    overflow: hidden;
     color: inherit;
     background: var(--vgrid-popup-background, Canvas);
     border: var(--vgrid-border-width, 1px) solid var(--vgrid-border-color, #dee2e6);
@@ -405,21 +415,21 @@ button.vgrid-toggle-subgrid {
     box-shadow: var(--vgrid-popup-shadow, 0 .4em 1.4em rgba(0, 0, 0, .18));
 }
 
-.vgrid-settings fieldset {
-    min-width: 0;
-    margin: 0;
-    padding: 0;
-    border: 0;
+.vgrid-settings:popover-open {
+    display: flex;
 }
 
-.vgrid-settings legend {
-    float: none;
-    width: auto;
-    margin: 0;
+.vgrid-settings-title {
+    flex: 0 0 auto;
     padding: 0 2em .4em 0;
-    font-size: inherit;
-    line-height: inherit;
     font-weight: 700;
+}
+
+.vgrid-settings-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
 }
 
 .vgrid-settings label {
@@ -468,6 +478,7 @@ button.vgrid-toggle-subgrid {
 }
 
 .vgrid-settings-actions {
+    flex: 0 0 auto;
     display: flex;
     gap: .35em;
     margin-top: .6em;

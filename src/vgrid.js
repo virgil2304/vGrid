@@ -1,4 +1,4 @@
-/* vGrid v1.0.0.5.63 | Last updated: 2026-10-24 */
+/* vGrid v1.0.0.5.65 | Last updated: 2026-10-24 */
 export function vGrid(config) {
 
     const { el, caption, columns: columnsConfig = [], data = [], dataSource, method = 'GET', headers = {},
@@ -580,10 +580,14 @@ export function vGrid(config) {
         settingsClose.setAttribute('popovertargetaction', 'hide');
         settingsPanel.appendChild(settingsClose);
 
-        const fieldset = document.createElement('fieldset');
-        const legend = document.createElement('legend');
-        legend.textContent = 'Display columns';
-        fieldset.appendChild(legend);
+        const settingsTitle = document.createElement('div');
+        settingsTitle.className = partClass('settings-title');
+        settingsTitle.id = `${settingsPanel.id}-title`;
+        settingsTitle.textContent = 'Display columns';
+        const settingsList = document.createElement('div');
+        settingsList.className = partClass('settings-list');
+        settingsList.setAttribute('role', 'group');
+        settingsList.setAttribute('aria-labelledby', settingsTitle.id);
         const settingsCheckboxes = [];
         const makeSettingsControl = (label, text) => {
             const button = document.createElement('button');
@@ -641,12 +645,12 @@ export function vGrid(config) {
             controls.append(entry.narrower, entry.wider);
             row.append(columnLabel, controls);
             settingsCheckboxes.push(entry);
-            fieldset.appendChild(row);
+            settingsList.appendChild(row);
         });
-        settingsPanel.appendChild(fieldset);
+        settingsPanel.append(settingsTitle, settingsList);
         syncSettingsOrder = () => {
             settingsCheckboxes.sort((a, b) => columns.indexOf(a.column) - columns.indexOf(b.column));
-            fieldset.append(...settingsCheckboxes.map(entry => entry.row));
+            settingsList.append(...settingsCheckboxes.map(entry => entry.row));
             settingsCheckboxes.forEach(entry => {
                 const index = activeColumns.indexOf(entry.column);
                 if (entry.moveEarlier) entry.moveEarlier.disabled = index <= 0;
@@ -683,29 +687,49 @@ export function vGrid(config) {
         settingsActions.append(applyButton, saveButton);
         settingsPanel.appendChild(settingsActions);
 
+        let settingsAbove = false;
+        const measureSettingsPanel = () => {
+            const anchor = settingsButton;
+            if (!anchor?.isConnected || !settingsPanel.matches(':popover-open')) return;
+            const gap = 4;
+            const viewportHeight = window.visualViewport?.height || window.innerHeight;
+            const button = anchor.getBoundingClientRect();
+            settingsPanel.style.maxHeight = '';
+            settingsList.style.maxHeight = '';
+            const wanted = settingsPanel.scrollHeight;
+            const spaceBelow = viewportHeight - button.bottom - gap * 2;
+            const spaceAbove = button.top - gap * 2;
+            settingsAbove = wanted > spaceBelow && spaceAbove > spaceBelow;
+            const limit = Math.max(120, Math.min(viewportHeight - gap * 2, settingsAbove ? spaceAbove : spaceBelow));
+            settingsPanel.style.maxHeight = `${limit}px`;
+            const spare = settingsPanel.clientHeight - settingsList.offsetHeight;
+            if (settingsPanel.clientHeight) settingsList.style.maxHeight = `${Math.max(48, limit - spare)}px`;
+        };
         const placeSettingsPanel = () => {
             const anchor = settingsButton;
             if (!anchor?.isConnected || !settingsPanel.matches(':popover-open')) return;
             const gap = 4;
+            const viewportHeight = window.visualViewport?.height || window.innerHeight;
             const button = anchor.getBoundingClientRect();
             const panel = settingsPanel.getBoundingClientRect();
-            const below = button.bottom + gap;
-            const above = button.top - gap - panel.height;
-            const top = below + panel.height <= window.innerHeight || above < 0 ? below : above;
+            const top = settingsAbove ? button.top - gap - panel.height : button.bottom + gap;
             const left = Math.max(gap, Math.min(button.right - panel.width, window.innerWidth - panel.width - gap));
-            settingsPanel.style.top = `${Math.max(gap, top)}px`;
+            settingsPanel.style.top = `${Math.max(gap, Math.min(top, viewportHeight - panel.height - gap))}px`;
             settingsPanel.style.left = `${left}px`;
         };
+        const fitSettingsPanel = () => { measureSettingsPanel(); placeSettingsPanel(); };
 
         settingsPanel.addEventListener('toggle', event => {
             if (event.newState !== 'open') return;
             settingsCheckboxes.forEach(({ column, checkbox }) => { checkbox.checked = column.active !== false; });
             syncSettingsOrder();
-            placeSettingsPanel();
+            fitSettingsPanel();
         }, { signal });
 
-        window.addEventListener('resize', placeSettingsPanel, { signal });
-        window.addEventListener('scroll', placeSettingsPanel, { signal, capture: true });
+        window.addEventListener('resize', fitSettingsPanel, { signal });
+        window.addEventListener('scroll', event => { if (!settingsPanel.contains(event.target)) placeSettingsPanel(); }, { signal, capture: true });
+        window.visualViewport?.addEventListener('resize', fitSettingsPanel, { signal });
+        window.visualViewport?.addEventListener('scroll', placeSettingsPanel, { signal });
     }
 
     if (downloadMode) {
@@ -1216,7 +1240,7 @@ export function vGrid(config) {
         button.setAttribute('aria-haspopup', 'menu');
         button.setAttribute('aria-label', `${name} filter: ${mode.text}`);
         button.dataset.vgridFilterMode = String(i);
-        button.style.cssText = `position:absolute;top:0;bottom:0;left:0;z-index:1;width:${FILTER_MODE_WIDTH};min-width:24px;min-height:24px;box-sizing:border-box;padding:0;border:0;background:none;font:inherit;line-height:1;color:inherit;cursor:pointer;overflow:hidden;`;
+        button.style.cssText = `position:absolute;top:0;bottom:0;left:0;z-index:1;width:${FILTER_MODE_WIDTH};padding:0;border:0;background:none;font:inherit;line-height:1;color:inherit;cursor:pointer;overflow:hidden;`;
         box.appendChild(button);
         mode.keys.forEach((key, slot) => {
             const input = makeTextFilter(col, i);
@@ -2471,7 +2495,7 @@ export function vGrid(config) {
     gridWrapper.dataset.vgridSize = currentSize;
     if (striped !== false) gridWrapper.dataset.vgridStriped = '1';
     if (hover !== false) gridWrapper.dataset.vgridHover = '1';
-    gridWrapper.style.cssText = 'display:block;position:relative;width:100%;overflow:hidden;';
+    gridWrapper.style.cssText = 'display:block;position:relative;width:100%;overflow-x:auto;overflow-y:hidden;';
     gridWrapper.style.setProperty('--vgrid-easing', `${easingMs}ms`);
     element.replaceWith(gridWrapper);
     gridWrapper.appendChild(element);
@@ -2519,18 +2543,51 @@ export function vGrid(config) {
     let freezePending = false;
     let columnFrame = 0;
     let frozenWidths = null;
+    let displayedWidths = null;
+    let widthGrowth = 0;
+    const updateScrollRegion = () => {
+        const scrolls = gridWrapper.scrollWidth > gridWrapper.clientWidth + 1;
+        if (scrolls) {
+            gridWrapper.tabIndex = 0;
+            gridWrapper.setAttribute('role', 'region');
+            gridWrapper.setAttribute('aria-label', `${accessibleCaptionText || 'Grid'}, scrolls sideways`);
+        } else if (gridWrapper.hasAttribute('tabindex')) {
+            gridWrapper.removeAttribute('tabindex');
+            gridWrapper.removeAttribute('role');
+            gridWrapper.removeAttribute('aria-label');
+        }
+    };
     const writeColumnWidths = () => {
         if (!columnsFrozen || !frozenWidths) return;
         const widths = frozenWidths;
-        const tableWidth = element.clientWidth;
+        const flexIndexes = widths.map((width, i) => i).filter(i => !isToggleCell(i));
         const toggleTotal = widths.reduce((sum, width, i) => sum + (isToggleCell(i) ? width : 0), 0);
-        const flexTotal = widths.reduce((sum, width, i) => sum + (isToggleCell(i) ? 0 : width), 0);
+        const flexTotal = flexIndexes.reduce((sum, i) => sum + widths[i], 0);
         if (!flexTotal) return;
-        const share = tableWidth ? Math.max(0, tableWidth - toggleTotal) / tableWidth : 1;
+        element.style.minWidth = `${Math.round((toggleTotal + flexIndexes.length * MIN_COLUMN_WIDTH + widthGrowth) * 10) / 10}px`;
+        const tableWidth = element.clientWidth;
+        const available = tableWidth ? Math.max(0, tableWidth - toggleTotal) : flexTotal;
+        const allocated = widths.map((width, i) => isToggleCell(i) ? width : width / flexTotal * available);
+        if (tableWidth) {
+            const fixed = new Set();
+            for (let pass = 0; pass < flexIndexes.length; pass++) {
+                const short = flexIndexes.filter(i => !fixed.has(i) && allocated[i] < MIN_COLUMN_WIDTH);
+                if (!short.length) break;
+                short.forEach(i => { fixed.add(i); allocated[i] = MIN_COLUMN_WIDTH; });
+                const free = flexIndexes.filter(i => !fixed.has(i));
+                const freeTotal = free.reduce((sum, i) => sum + widths[i], 0);
+                const remaining = Math.max(0, available - fixed.size * MIN_COLUMN_WIDTH);
+                free.forEach(i => { allocated[i] = freeTotal ? widths[i] / freeTotal * remaining : 0; });
+            }
+        }
+        const base = tableWidth || flexTotal;
         columnCols.forEach((col, i) => {
-            col.style.width = isToggleCell(i) ? `${widths[i]}px` : `${(widths[i] / flexTotal) * share * 100}%`;
+            col.style.width = isToggleCell(i) ? `${widths[i]}px` : `${allocated[i] / base * 100}%`;
         });
+        displayedWidths = tableWidth ? allocated : null;
+        updateScrollRegion();
     };
+    const resizeBaseWidths = () => (displayedWidths || frozenWidths).slice();
     const columnObserver = new ResizeObserver(() => {
         if (!freezePending) { writeColumnWidths(); return; }
         if (columnFrame) return;
@@ -2540,6 +2597,7 @@ export function vGrid(config) {
         });
     });
     columnObserver.observe(element);
+    columnObserver.observe(gridWrapper);
     let cursorHost = null;
     let suppressHeaderClick = false;
     let destroyed = false;
@@ -2681,6 +2739,8 @@ export function vGrid(config) {
     };
 
     const renderPageButtons = (pagerEl, totalPages, size = 7) => {
+        const focused = pagerEl.contains(document.activeElement) ? document.activeElement : null;
+        const keepFocus = focused ? (focused.getAttribute('aria-label') || `page ${focused.dataset.vgridPage}`) : null;
         pagerEl.innerHTML = '';
         const btn = (label, page, disabled, active, ariaLabel) => {
             const b = document.createElement('button');
@@ -2706,6 +2766,10 @@ export function vGrid(config) {
         });
         pagerEl.appendChild(btn('›', currentPage + 1, currentPage === totalPages, false, 'Next page'));
         pagerEl.appendChild(btn('»', totalPages, currentPage === totalPages, false, 'Last page'));
+        if (!keepFocus) return;
+        const again = [...pagerEl.querySelectorAll('button')].find(b => (b.getAttribute('aria-label') || `page ${b.dataset.vgridPage}`) === keepFocus)
+            || pagerEl.querySelector('button[aria-current="page"]');
+        again?.focus();
     };
 
     const layoutPagination = entry => {
@@ -2761,7 +2825,11 @@ export function vGrid(config) {
     };
 
     const render = () => {
-        if (isRemote) { fetchData(); return; }
+        if (isRemote) {
+            if (pagerTotalPages !== null) renderPagers(pagerTotalPages);
+            fetchData();
+            return;
+        }
 
         const filtered = visibleData();
 
@@ -3023,7 +3091,9 @@ export function vGrid(config) {
 
         columnsFrozen = false;
         frozenWidths = null;
+        widthGrowth = 0;
         element.style.tableLayout = 'auto';
+        element.style.minWidth = '';
         setCursorHost(null);
         updateSortIndicators();
         currentPage = 1;
@@ -3089,7 +3159,8 @@ export function vGrid(config) {
                 next[i] = widths[i] + (delta > 0 ? -share * move : share * move);
             }
         }
-        next[index] = widths[index] + (delta > 0 ? move : -move);
+        next[index] = widths[index] + (delta > 0 ? delta : -move);
+        if (delta > 0) widthGrowth += delta - move;
         applyColumnWidths(next);
     };
 
@@ -3105,7 +3176,7 @@ export function vGrid(config) {
             adjustment = -delta;
         }
         if (index < 0) return;
-        resizeState = { index, widths: frozenWidths.slice() };
+        resizeState = { index, widths: resizeBaseWidths() };
         resizeColumns(adjustment);
         resizeState = null;
         announceResultCount(`${column.label || column.name} column width ${Math.round(frozenWidths[headerCells.indexOf(columnHeaders[position])])} pixels.`);
