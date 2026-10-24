@@ -51,11 +51,30 @@
 .vgrid-subgrid-cell {
     padding: 0;
     max-width: 0;
-    overflow: hidden;
+    overflow: clip;
+}
+
+.vgrid-viewport,
+.vgrid-pagination-bar,
+.vgrid-subgrid-slide {
+    position: sticky;
+    left: 0;
+    box-sizing: border-box;
+    max-width: 100%;
+}
+
+.vgrid-viewport,
+.vgrid-pagination-bar {
+    width: calc(var(--vgrid-viewport, 100%) - .2em);
+}
+
+span.vgrid-viewport {
+    display: block;
 }
 
 .vgrid-subgrid-slide {
     display: block;
+    width: var(--vgrid-viewport, 100%);
     height: 0;
     overflow: hidden;
     contain: inline-size;

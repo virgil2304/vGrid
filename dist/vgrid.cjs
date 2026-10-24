@@ -1,4 +1,4 @@
-/* vGrid v1.0.565 */
+/* vGrid v1.0.566 */
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -822,11 +822,14 @@ function vGrid(config) {
     tr.setAttribute("role", "presentation");
     const td = document.createElement("td");
     td.colSpan = totalCols;
+    const inner = document.createElement("div");
+    inner.className = partClass("viewport");
     if (caption) {
-      td.innerHTML = caption;
-      accessibleCaptionText = td.textContent.replace(/\s+/g, " ").trim() || accessibleCaptionText;
+      inner.innerHTML = caption;
+      accessibleCaptionText = inner.textContent.replace(/\s+/g, " ").trim() || accessibleCaptionText;
     }
-    if (captionActions) td.insertBefore(makeActions(), td.firstChild);
+    if (captionActions) inner.insertBefore(makeActions(), inner.firstChild);
+    td.appendChild(inner);
     tr.appendChild(td);
     trackColSpan(td);
     thead.appendChild(tr);
@@ -2065,7 +2068,10 @@ function vGrid(config) {
     tr.className = partClass("empty");
     const td = document.createElement("td");
     td.colSpan = totalCols;
-    td.textContent = "No records to show.";
+    const text = document.createElement("span");
+    text.className = partClass("viewport");
+    text.textContent = "No records to show.";
+    td.appendChild(text);
     tr.appendChild(td);
     trackColSpan(td);
     return tr;
@@ -2389,6 +2395,7 @@ function vGrid(config) {
   const placeLoadingIndicator = () => {
     loadingIndicator.style.top = `${tbody.offsetTop}px`;
     loadingIndicator.style.height = `${Math.max(tbody.offsetHeight, 40)}px`;
+    loadingIndicator.style.left = `${gridWrapper.scrollLeft}px`;
   };
   const showLoading = () => {
     if (!tbody.rows.length) tbody.appendChild(loadingSpacer());
@@ -2426,7 +2433,10 @@ function vGrid(config) {
     tr.setAttribute("role", "presentation");
     const td = document.createElement("td");
     td.colSpan = totalCols;
-    td.appendChild(makeActions());
+    const inner = document.createElement("div");
+    inner.className = partClass("viewport");
+    inner.appendChild(makeActions());
+    td.appendChild(inner);
     tr.appendChild(td);
     trackColSpan(td);
     tfoot.appendChild(tr);
@@ -2490,7 +2500,11 @@ function vGrid(config) {
   let frozenWidths = null;
   let displayedWidths = null;
   let widthGrowth = 0;
+  const setViewportWidth = () => {
+    if (gridWrapper.clientWidth) gridWrapper.style.setProperty("--vgrid-viewport", `${gridWrapper.clientWidth}px`);
+  };
   const updateScrollRegion = () => {
+    setViewportWidth();
     const scrolls = gridWrapper.scrollWidth > gridWrapper.clientWidth + 1;
     if (scrolls) {
       gridWrapper.tabIndex = 0;
@@ -2538,19 +2552,25 @@ function vGrid(config) {
     updateScrollRegion();
   };
   const resizeBaseWidths = () => (displayedWidths || frozenWidths).slice();
+  let observedWidths = "";
   const columnObserver = new ResizeObserver(() => {
-    if (!freezePending) {
-      writeColumnWidths();
-      return;
-    }
+    const widths = `${gridWrapper.clientWidth}:${element.clientWidth}`;
+    if (widths === observedWidths && !freezePending) return;
+    observedWidths = widths;
     if (columnFrame) return;
     columnFrame = requestAnimationFrame(() => {
       columnFrame = 0;
-      if (!destroyed && freezePending) freezeColumns();
+      if (destroyed) return;
+      setViewportWidth();
+      if (freezePending) freezeColumns();
+      else writeColumnWidths();
     });
   });
   columnObserver.observe(element);
   columnObserver.observe(gridWrapper);
+  gridWrapper.addEventListener("scroll", () => {
+    if (loadingIndicator.style.display !== "none") placeLoadingIndicator();
+  }, { signal, passive: true });
   let cursorHost = null;
   let suppressHeaderClick = false;
   let destroyed = false;
