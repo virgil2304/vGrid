@@ -1,4 +1,4 @@
-/* vGrid v1.0.551 */
+/* vGrid v1.0.552 */
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -2239,17 +2239,21 @@ function vGrid(config) {
     link.remove();
     setTimeout(() => URL.revokeObjectURL(href), 1e3);
   };
-  const csvValue = (value) => {
+  const csvValue = (value, isNumeric = false) => {
     const text = String(value ?? "").replace(/\s+/g, " ").trim();
-    const formula = /^[=+@\t\r]/.test(text) || text.startsWith("-") && !/^-?\d+(\.\d+)?$/.test(text);
+    const formula = !isNumeric && (/^[=+@＝＋＠－\t\r\n]/u.test(text) || text.startsWith("-") && !/^-?\d+(\.\d+)?$/.test(text));
     const safe = formula ? `'${text}` : text;
     return /[",]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
   };
   const downloadFromView = () => {
     const rows = isRemote ? currentRows : visibleData();
-    const head = activeColumns.map((col) => col.label || col.name);
-    const body = rows.map((row) => activeColumns.map((col) => cellText(row, col)));
-    const csv = "\uFEFF" + [head, ...body].map((line) => line.map(csvValue).join(",")).join("\r\n");
+    const head = activeColumns.map((col) => csvValue(col.label || col.name));
+    const body = rows.map((row) => activeColumns.map((col) => {
+      const value = row[col.name] ?? "";
+      const isNumeric = typeof value === "number" && Number.isFinite(value) && (!col.type || col.type === "number" || col.type === "currency");
+      return csvValue(cellText(row, col), isNumeric);
+    }));
+    const csv = "\uFEFF" + [head, ...body].map((line) => line.join(",")).join("\r\n");
     saveBlob(new Blob([csv], { type: "text/csv;charset=utf-8" }), `${downloadBaseName()}.csv`);
   };
   const fileNameFromHeaders = (response) => {
