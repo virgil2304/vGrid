@@ -1,4 +1,4 @@
-/* vGrid v1.0.0.5.60 | Last updated: 2026-10-24 */
+/* vGrid v1.0.0.5.61 | Last updated: 2026-10-24 */
 export function vGrid(config) {
 
     const { el, caption, columns: columnsConfig = [], data = [], dataSource, method = 'GET', headers = {},
@@ -2158,6 +2158,8 @@ export function vGrid(config) {
                 const definitions = typeof rowActions === 'function' ? rowActions(row) : rowActions;
                 (Array.isArray(definitions) ? definitions : []).forEach(action => {
                     if (!action || typeof action !== 'object' || typeof action.onClick !== 'function') return;
+                    if (action.name !== undefined && typeof action.name !== 'string') console.error('vGrid: rowActions[].name must be a string.');
+                    const name = typeof action.name === 'string' && action.name.trim() ? action.name.trim() : String(action.label ?? 'action');
                     const button = document.createElement('button');
                     button.type = 'button';
                     button.textContent = String(action.label ?? 'Action');
@@ -2166,8 +2168,8 @@ export function vGrid(config) {
                     button.style.minWidth = '24px';
                     button.style.minHeight = '24px';
                     button.style.boxSizing = 'border-box';
-                    button.dataset.vgridRowAction = '1';
-                    rowActionHandlers.set(button, { row, action });
+                    button.dataset.vgridRowAction = name;
+                    rowActionHandlers.set(button, { row, action, name });
                     td.appendChild(button);
                 });
                 cells.push(td);
@@ -2312,7 +2314,7 @@ export function vGrid(config) {
         const actionButton = event.target.closest('[data-vgrid-row-action]');
         if (actionButton) {
             const handler = rowActionHandlers.get(actionButton);
-            if (handler) handler.action.onClick({ row: handler.row, event, grid: instance });
+            if (handler) handler.action.onClick({ row: handler.row, event, grid: instance, name: handler.name });
             return;
         }
         const interactive = event.target.closest('button, a, input, select, textarea');
