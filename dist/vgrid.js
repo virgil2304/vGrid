@@ -1,4 +1,4 @@
-/* vGrid v1.0.0.5.55 | Last updated: 2026-10-24 */
+/* vGrid v1.0.0.5.58 | Last updated: 2026-10-24 */
 function vGrid(config) {
 
     const { el, caption, columns: columnsConfig = [], data = [], dataSource, method = 'GET', headers = {},
@@ -8,8 +8,16 @@ function vGrid(config) {
         externalFilters = {}, externalRowsPerPage, externalPagination, externalSort = {}, externalSummary = {},
         settings = true, externalSettings, subgrid, inheritQueryString = false, borders = 'horizontal', size = 'medium', striped = true, hover = true, actions = 'caption', easing = 160,
         download = false, print = true, autoDestroy = false, reorderColumns = true, reorderDelay = 350,
-        onSort, onFilter, onPage, onReady, namespace } = config;
+        rowActions = false, rowReorder = false, cellSelection = false,
+        onSort, onFilter, onPage, onReady, onRowClick, onRowDblClick, onRowReorder, namespace } = config;
     const columns = Array.isArray(columnsConfig) ? [...columnsConfig] : [];
+    const sortByPrimary = Array.isArray(sortBy) ? sortBy[0] : sortBy;
+    const hasRowActions = Array.isArray(rowActions) || typeof rowActions === 'function';
+    const rowReorderActive = rowReorder === true;
+    const cellSelectionActive = cellSelection === true;
+    if (rowActions && !hasRowActions) console.error('vGrid: rowActions must be an array, a function, or false.');
+    if (rowReorder !== true && rowReorder !== false) console.error('vGrid: rowReorder must be true or false.');
+    if (cellSelection !== true && cellSelection !== false) console.error('vGrid: cellSelection must be true or false.');
 
     const toPageSize = value => {
         const size = parseInt(value);
@@ -261,6 +269,7 @@ function vGrid(config) {
     let localData = data;
     let currentRows = [];
     let currentOffset = 0;
+    let remoteTotal = null;
     const rowData = new WeakMap();
     const panelOwners = new WeakMap();
 
@@ -362,7 +371,7 @@ function vGrid(config) {
                 opt.textContent = c.label || c.name;
                 return opt;
             }));
-        externalSortColumnElement.value = selected || sortBy?.column || '';
+        externalSortColumnElement.value = selected || sortByPrimary?.column || '';
     };
     buildExternalSortOptions();
     if (externalSortDirectionElement?.tagName === 'SELECT' && !externalSortDirectionElement.options.length) {
@@ -374,7 +383,7 @@ function vGrid(config) {
         desc.textContent = 'Descending';
         externalSortDirectionElement.replaceChildren(asc, desc);
     }
-    if (externalSortDirectionElement && sortBy?.order) externalSortDirectionElement.value = sortBy.order;
+    if (externalSortDirectionElement && sortByPrimary?.order) externalSortDirectionElement.value = sortByPrimary.order;
 
     const element = target.tagName === 'TABLE' ? target : document.createElement('table');
     const createdTable = element !== target;
@@ -382,16 +391,23 @@ function vGrid(config) {
     const originalAriaLabel = element.getAttribute('aria-label');
     const originalAriaLabelledBy = element.getAttribute('aria-labelledby');
     const originalAriaRowCount = element.getAttribute('aria-rowcount');
+    const originalRole = element.getAttribute('role');
+    const originalAriaMultiSelectable = element.getAttribute('aria-multiselectable');
     const originalCaptionText = element.caption?.textContent.replace(/\s+/g, ' ').trim() || '';
     let accessibleCaptionText = originalCaptionText;
     const hasSortableColumns = columns.some(column => column.sort !== false);
     let sortInstructions = null;
-    if (hasSortableColumns) {
+    if (hasSortableColumns || cellSelectionActive) {
         sortInstructions = document.createElement('span');
         let id = 'vgrid-sort-instructions';
         for (let suffix = 1; document.getElementById(id); suffix++) id = `vgrid-sort-instructions-${suffix}`;
         sortInstructions.id = id;
-        sortInstructions.textContent = 'Sortable column headings are buttons. Activate a heading to sort; the current direction is announced with the heading.';
+        sortInstructions.textContent = [
+            hasSortableColumns ? 'Sortable column headings are buttons. Activate a heading to sort; the current direction is announced with the heading. Hold Shift while activating another heading to add a secondary sort; priority and direction are announced with each sorted heading.' : '',
+            cellSelectionActive ? 'Use arrow keys to move between cells, hold Shift with an arrow key to extend the selected range, and press Ctrl or Command+C to copy selected cells as tab-separated text. Pasting is not supported.' : '',
+            onRowClick ? 'Rows with row-click callbacks can be activated with Enter or Space.' : '',
+            onRowDblClick ? 'Shift+Enter runs the row double-click callback; row action buttons remain separate controls.' : '',
+        ].filter(Boolean).join(' ');
         sortInstructions.style.cssText = 'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;';
         const describedBy = new Set((originalAriaDescribedBy || '').split(/\s+/).filter(Boolean));
         describedBy.add(id);
@@ -406,7 +422,8 @@ function vGrid(config) {
     element.style.borderCollapse = 'collapse';
     element.style.tableLayout = 'auto';
 
-    const colOffset = subgrids.length + (rowNumbers ? 1 : 0);
+    const utilityColumnCount = Number(rowReorderActive) + Number(hasRowActions);
+    const colOffset = subgrids.length + (rowNumbers ? 1 : 0) + utilityColumnCount;
     let totalCols = activeColumns.length + colOffset;
     let toggleIndexes = [];
     let toggleIndexesSorted = [];
@@ -439,6 +456,7 @@ function vGrid(config) {
         let position = index - toggleIndexesSorted.filter(at => at < index).length - (rowNumbers ? 1 : 0);
         return position >= 0 ? activeColumns[position] : null;
     };
+    const isAdjustableColumn = index => !isToggleCell(index) && !!columnAtCell(index);
     const colgroup = document.createElement('colgroup');
     const columnCols = [];
     const colSpanCells = [];
@@ -497,6 +515,11 @@ function vGrid(config) {
         if (config.html instanceof Element) button.replaceChildren(config.html.cloneNode(true));
         else if (typeof config.html === 'string') button.innerHTML = config.html;
         else button.textContent = config.symbol ?? '';
+        const accessibleLabel = config.ariaLabel ?? config.label ?? config.title;
+        if (accessibleLabel) button.setAttribute('aria-label', String(accessibleLabel));
+        button.style.minWidth = '24px';
+        button.style.minHeight = '24px';
+        button.style.boxSizing = 'border-box';
         return button;
     };
 
@@ -529,6 +552,9 @@ function vGrid(config) {
         settingsClose.textContent = '\u00D7';
         settingsClose.title = 'Close';
         settingsClose.setAttribute('aria-label', 'Close');
+        settingsClose.style.minWidth = '24px';
+        settingsClose.style.minHeight = '24px';
+        settingsClose.style.boxSizing = 'border-box';
         settingsClose.setAttribute('popovertarget', settingsPanel.id);
         settingsClose.setAttribute('popovertargetaction', 'hide');
         settingsPanel.appendChild(settingsClose);
@@ -538,26 +564,81 @@ function vGrid(config) {
         legend.textContent = 'Display columns';
         fieldset.appendChild(legend);
         const settingsCheckboxes = [];
-        columns.forEach(col => {
-            const row = document.createElement('label');
-            row.style.display = 'block';
+        const makeSettingsControl = (label, text) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.textContent = text;
+            button.title = label;
+            button.setAttribute('aria-label', label);
+            button.style.minWidth = '24px';
+            button.style.minHeight = '24px';
+            button.style.boxSizing = 'border-box';
+            button.style.padding = '0 .3em';
+            return button;
+        };
+        columns.forEach((col, index) => {
+            const row = document.createElement('div');
+            row.className = partClass('settings-column');
+            row.style.cssText = 'display:flex;align-items:center;gap:.25em;margin:.15em 0;';
+            const columnLabel = document.createElement('label');
+            columnLabel.style.cssText = 'display:flex;align-items:center;flex:1 1 auto;min-width:0;margin:0;';
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
+            checkbox.id = `${settingsPanel.id}-column-${index}`;
             checkbox.checked = col.active !== false;
             checkbox.addEventListener('change', () => {
                 if (!checkbox.checked && !settingsCheckboxes.some(entry => entry.checkbox.checked)) {
                     checkbox.checked = true;
                 }
             }, { signal });
-            settingsCheckboxes.push({ column: col, checkbox, row });
-            row.append(checkbox, document.createTextNode(` ${col.label || col.name}`));
+            columnLabel.htmlFor = checkbox.id;
+            columnLabel.append(checkbox, document.createTextNode(` ${col.label || col.name}`));
+            const controls = document.createElement('span');
+            controls.style.cssText = 'display:flex;gap:.2em;flex:0 0 auto;';
+            const entry = { column: col, checkbox, row, controls, moveEarlier: null, moveLater: null, narrower: null, wider: null };
+            if (reorderColumns !== false) {
+                entry.moveEarlier = makeSettingsControl(`Move ${col.label || col.name} column earlier`, '\u2191');
+                entry.moveLater = makeSettingsControl(`Move ${col.label || col.name} column later`, '\u2193');
+                entry.moveEarlier.addEventListener('click', () => {
+                    const current = activeColumns.indexOf(col);
+                    if (current > 0 && moveColumn(current, current - 1)) {
+                        syncSettingsOrder();
+                        announceResultCount(`${col.label || col.name} column moved to position ${activeColumns.indexOf(col) + 1} of ${activeColumns.length}.`);
+                        entry.moveEarlier.focus();
+                    }
+                }, { signal });
+                entry.moveLater.addEventListener('click', () => {
+                    const current = activeColumns.indexOf(col);
+                    if (current !== -1 && current < activeColumns.length - 1 && moveColumn(current, current + 2)) {
+                        syncSettingsOrder();
+                        announceResultCount(`${col.label || col.name} column moved to position ${activeColumns.indexOf(col) + 1} of ${activeColumns.length}.`);
+                        entry.moveLater.focus();
+                    }
+                }, { signal });
+                controls.append(entry.moveEarlier, entry.moveLater);
+            }
+            entry.narrower = makeSettingsControl(`Decrease ${col.label || col.name} column width`, '\u2212');
+            entry.wider = makeSettingsControl(`Increase ${col.label || col.name} column width`, '+');
+            entry.narrower.addEventListener('click', () => resizeColumnBy(col, -10), { signal });
+            entry.wider.addEventListener('click', () => resizeColumnBy(col, 10), { signal });
+            controls.append(entry.narrower, entry.wider);
+            row.append(columnLabel, controls);
+            settingsCheckboxes.push(entry);
             fieldset.appendChild(row);
         });
         settingsPanel.appendChild(fieldset);
         syncSettingsOrder = () => {
             settingsCheckboxes.sort((a, b) => columns.indexOf(a.column) - columns.indexOf(b.column));
             fieldset.append(...settingsCheckboxes.map(entry => entry.row));
+            settingsCheckboxes.forEach(entry => {
+                const index = activeColumns.indexOf(entry.column);
+                if (entry.moveEarlier) entry.moveEarlier.disabled = index <= 0;
+                if (entry.moveLater) entry.moveLater.disabled = index < 0 || index >= activeColumns.length - 1;
+                entry.narrower.disabled = index < 0 || activeColumns.length < 2;
+                entry.wider.disabled = index < 0 || activeColumns.length < 2;
+            });
         };
+        syncSettingsOrder();
 
         const applyPending = () => {
             settingsCheckboxes.forEach(({ column, checkbox }) => { column.active = checkbox.checked; });
@@ -568,11 +649,15 @@ function vGrid(config) {
         const applyButton = document.createElement('button');
         applyButton.type = 'button';
         applyButton.textContent = 'Apply';
+        applyButton.style.minWidth = '24px';
+        applyButton.style.minHeight = '24px';
         applyButton.addEventListener('click', applyPending, { signal });
 
         const saveButton = document.createElement('button');
         saveButton.type = 'button';
         saveButton.textContent = 'Save';
+        saveButton.style.minWidth = '24px';
+        saveButton.style.minHeight = '24px';
         saveButton.addEventListener('click', () => {
             applyPending();
             const preference = {};
@@ -602,6 +687,7 @@ function vGrid(config) {
         settingsPanel.addEventListener('toggle', event => {
             if (event.newState !== 'open') return;
             settingsCheckboxes.forEach(({ column, checkbox }) => { checkbox.checked = column.active !== false; });
+            syncSettingsOrder();
             placeSettingsPanel();
         }, { signal });
 
@@ -842,9 +928,11 @@ function vGrid(config) {
         columnHeaders.length = 0;
         columnHeaderLabels.length = 0;
         const cells = [];
+        if (cellSelectionActive) headerRow.setAttribute('role', 'row');
         if (rowNumbers) {
             const th = document.createElement('th');
             th.scope = 'col';
+            if (cellSelectionActive) th.setAttribute('role', 'columnheader');
             cells.push(clipCell(th));
         }
         activeColumns.forEach((col, i) => {
@@ -852,6 +940,7 @@ function vGrid(config) {
             const label = col.label || col.name;
             th.textContent = label;
             th.scope = 'col';
+            if (cellSelectionActive) th.setAttribute('role', 'columnheader');
             if (col.width) th.width = String(col.width);
             if (col.sort !== false) {
                 th.title = `Sort by ${label}`;
@@ -860,6 +949,7 @@ function vGrid(config) {
                 button.type = 'button';
                 button.style.cssText = 'display:block;width:100%;box-sizing:border-box;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;';
                 button.appendChild(document.createTextNode(label));
+                button.setAttribute('aria-label', `Sort by ${label}`);
                 const indicator = document.createElement('span');
                 indicator.dataset.vgridSortIndicator = '1';
                 indicator.setAttribute('aria-hidden', 'true');
@@ -870,6 +960,20 @@ function vGrid(config) {
             columnHeaders.push(th);
             columnHeaderLabels.push(label);
         });
+        if (rowReorderActive) {
+            const th = document.createElement('th');
+            th.scope = 'col';
+            th.textContent = 'Row order';
+            th.setAttribute('aria-label', 'Row order controls');
+            cells.push(clipCell(th));
+        }
+        if (hasRowActions) {
+            const th = document.createElement('th');
+            th.scope = 'col';
+            th.textContent = 'Actions';
+            th.setAttribute('aria-label', 'Row actions');
+            cells.push(clipCell(th));
+        }
         if (hasPanels) {
             placeToggleCells(cells, () => {
                 const th = document.createElement('th');
@@ -890,12 +994,17 @@ function vGrid(config) {
             return;
         }
         const i = parseInt(th.dataset.vgridSort);
-        if (sortColIndex === i) {
-            sortOrder = sortOrder === 'asc' ? 'desc' : 'asc';
+        const name = activeColumns[i]?.name;
+        const existing = sortCriteria.find(sort => sort.column === name);
+        if (event.shiftKey) {
+            if (existing) existing.order = existing.order === 'asc' ? 'desc' : 'asc';
+            else sortCriteria.push({ column: name, order: 'asc' });
         } else {
-            sortColIndex = i;
-            sortOrder = 'asc';
+            const order = existing ? (existing.order === 'asc' ? 'desc' : 'asc') : 'asc';
+            sortCriteria = [{ column: name, order }];
         }
+        sortColIndex = activeColumns.findIndex(column => column.name === sortCriteria[0]?.column);
+        sortOrder = sortCriteria[0]?.order ?? null;
         currentPage = 1;
         applySort();
     }, { signal });
@@ -916,7 +1025,7 @@ function vGrid(config) {
     filterModeMenu.menu.setAttribute('popover', '');
     filterModeMenu.menu.setAttribute('role', 'menu');
     filterModeMenu.menu.className = partClass('filter-mode-menu');
-    const FILTER_MODE_WIDTH = '1.6em';
+    const FILTER_MODE_WIDTH = '24px';
 
     const htmlToText = html => {
         const template = document.createElement('template');
@@ -1037,7 +1146,6 @@ function vGrid(config) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = partClass('filter-clear');
-        button.tabIndex = -1;
         button.hidden = true;
         button.textContent = '\u00D7';
         button.setAttribute('aria-label', `Clear ${col.label || col.name} filter`);
@@ -1045,7 +1153,10 @@ function vGrid(config) {
         button.style.top = '0';
         button.style.bottom = '0';
         button.style.right = isSelect ? '1.2em' : '0';
-        button.style.width = '1.2em';
+        button.style.width = '24px';
+        button.style.minWidth = '24px';
+        button.style.minHeight = '24px';
+        button.style.boxSizing = 'border-box';
         button.style.padding = '0';
         button.style.border = '0';
         button.style.background = 'none';
@@ -1056,7 +1167,7 @@ function vGrid(config) {
         button.style.cursor = 'pointer';
         button.dataset.vgridFilterClear = '1';
         wrap.append(control, button);
-        filterClears.push({ control, button, pad: isSelect ? '2.4em' : '1.2em' });
+        filterClears.push({ control, button, pad: isSelect ? 'calc(24px + 1.2em)' : '24px' });
         return wrap;
     };
 
@@ -1065,6 +1176,8 @@ function vGrid(config) {
         input.className = partClass(`filter-${col.name}`);
         input.type = 'text';
         input.placeholder = col.label || col.name;
+        input.setAttribute('aria-label', `Filter by ${col.label || col.name}`);
+        input.style.minHeight = '24px';
         input.dataset.col = String(i);
         return input;
     };
@@ -1085,13 +1198,16 @@ function vGrid(config) {
         button.setAttribute('aria-haspopup', 'menu');
         button.setAttribute('aria-label', `${name} filter: ${mode.text}`);
         button.dataset.vgridFilterMode = String(i);
-        button.style.cssText = `position:absolute;top:0;bottom:0;left:0;z-index:1;width:${FILTER_MODE_WIDTH};padding:0;border:0;background:none;font:inherit;line-height:1;color:inherit;cursor:pointer;overflow:hidden;`;
+        button.style.cssText = `position:absolute;top:0;bottom:0;left:0;z-index:1;width:${FILTER_MODE_WIDTH};min-width:24px;min-height:24px;box-sizing:border-box;padding:0;border:0;background:none;font:inherit;line-height:1;color:inherit;cursor:pointer;overflow:hidden;`;
         box.appendChild(button);
         mode.keys.forEach((key, slot) => {
             const input = makeTextFilter(col, i);
             input.dataset.param = key;
             input.dataset.slot = String(slot);
-            if (mode.keys.length > 1) input.placeholder = slot ? 'to' : 'from';
+            if (mode.keys.length > 1) {
+                input.placeholder = slot ? 'to' : 'from';
+                input.setAttribute('aria-label', `${name} ${slot ? 'to' : 'from'}`);
+            }
             input.style.width = '100%';
             input.style.boxSizing = 'border-box';
             if (!slot) input.style.paddingLeft = FILTER_MODE_WIDTH;
@@ -1119,6 +1235,7 @@ function vGrid(config) {
             item.setAttribute('aria-checked', mode === current ? 'true' : 'false');
             item.title = mode.text;
             item.dataset.vgridFilterModeKey = mode.key;
+            item.style.minHeight = '24px';
             if (mode.symbol) {
                 const symbol = document.createElement('span');
                 symbol.className = partClass('filter-mode-symbol');
@@ -1184,6 +1301,8 @@ function vGrid(config) {
                 if (col.filterType === 'select') {
                     const select = document.createElement('select');
                     select.className = partClass(`filter-${col.name}`);
+                    select.setAttribute('aria-label', `Filter by ${col.label || col.name}`);
+                    select.style.minHeight = '24px';
                     select.dataset.col = String(i);
                     (col.filterOptions || '').split(';').forEach(pair => {
                         const sep = pair.indexOf(':');
@@ -1387,6 +1506,10 @@ function vGrid(config) {
     }
 
     const tbody = document.createElement('tbody');
+    if (cellSelectionActive) {
+        element.setAttribute('role', 'grid');
+        element.setAttribute('aria-multiselectable', 'true');
+    }
     let loadingIndicator, loadingBadge, loadingSpinner, loadingText, loadingShowTimer;
 
     const isSafeHref = (href) => {
@@ -1460,6 +1583,9 @@ function vGrid(config) {
         if (node) {
             node.classList.add(...toggleClasses);
             node.dataset.vgridToggle = String(sub.order);
+            node.style.minWidth = '24px';
+            node.style.minHeight = '24px';
+            node.style.boxSizing = 'border-box';
             if (opensMenu) {
                 node.dataset.vgridMenu = '1';
                 node.setAttribute('aria-haspopup', 'menu');
@@ -1469,6 +1595,9 @@ function vGrid(config) {
         const button = document.createElement('button');
         button.type = 'button';
         button.className = toggleClasses.join(' ');
+        button.style.minWidth = '24px';
+        button.style.minHeight = '24px';
+        button.style.boxSizing = 'border-box';
         button.dataset.vgridToggle = String(sub.order);
         if (opensMenu) {
             button.dataset.vgridMenu = '1';
@@ -1501,7 +1630,10 @@ function vGrid(config) {
 
     const setToggleState = (sub, toggle, open, panel) => {
         if (!sub.toggleMarkup) toggle.textContent = toggle.dataset.vgridMenu ? SUBGRID_MENU : open ? SUBGRID_OPEN : SUBGRID_CLOSED;
-        toggle.title = open ? `Showing ${panelLabel(panel)}` : toggle.dataset.vgridPanel ? `Show ${toggle.dataset.vgridPanel}` : 'Choose what to show';
+        const label = panelLabel(panel || (toggle.dataset.vgridPanel ? { label: toggle.dataset.vgridPanel } : null));
+        const accessibleLabel = toggle.dataset.vgridMenu ? 'Choose what to show' : `${open ? 'Hide' : 'Show'} ${label}`;
+        toggle.title = open ? `Showing ${label}` : toggle.dataset.vgridMenu ? 'Choose what to show' : `Show ${label}`;
+        toggle.setAttribute('aria-label', accessibleLabel);
         toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     };
 
@@ -1689,6 +1821,9 @@ function vGrid(config) {
         close.textContent = '\u00D7';
         close.title = 'Close';
         close.setAttribute('aria-label', 'Close');
+        close.style.minWidth = '24px';
+        close.style.minHeight = '24px';
+        close.style.boxSizing = 'border-box';
         close.dataset.vgridClose = '1';
         const entry = { panelRow, toggle, body, slide, clip, close, state: 'opening', ready: false, observer: null, frame: 0, instance: null, fetchAbort: null, panel: null };
         sub.entries.set(tr, entry);
@@ -1740,6 +1875,7 @@ function vGrid(config) {
         if (selectable) item.setAttribute('aria-checked', current ? 'true' : 'false');
         item.textContent = text;
         item.title = text;
+        item.style.minHeight = '24px';
         return item;
     };
 
@@ -1935,6 +2071,10 @@ function vGrid(config) {
     const buildRows = (rows, offset = 0) => {
         clearSubgrids();
         tbody.replaceChildren();
+        if (cellSelectionActive) {
+            cellSelectionAnchor = null;
+            cellSelectionFocus = null;
+        }
         currentRows = rows;
         currentOffset = offset;
         if (!rows.length) {
@@ -1943,6 +2083,11 @@ function vGrid(config) {
         }
         rows.forEach((row, index) => {
             const tr = document.createElement('tr');
+            if (cellSelectionActive) tr.setAttribute('role', 'row');
+            if ((onRowClick || onRowDblClick) && !cellSelectionActive) {
+                tr.tabIndex = 0;
+                tr.dataset.vgridClickable = '1';
+            }
             tr.className = partClass('row', row.id !== undefined && namePrefix ? `${namePrefix}-row-${row.id}` : '');
             if (index % 2 === 0) tr.dataset.vgridStripe = '1';
             rowData.set(tr, row);
@@ -1967,8 +2112,68 @@ function vGrid(config) {
                 } else {
                     td.textContent = value;
                 }
+                if (cellSelectionActive) {
+                    const columnIndex = activeColumns.indexOf(col);
+                    td.setAttribute('role', 'gridcell');
+                    td.tabIndex = rows.length && index === 0 && columnIndex === 0 ? 0 : -1;
+                    td.setAttribute('aria-selected', 'false');
+                    td.dataset.vgridCellRow = String(index);
+                    td.dataset.vgridCellColumn = String(columnIndex);
+                }
                 cells.push(clipCell(td));
             });
+            if (rowReorderActive) {
+                const td = document.createElement('td');
+                td.className = partClass('row-reorder');
+                const up = document.createElement('button');
+                up.type = 'button';
+                up.textContent = '\u2191';
+                up.title = 'Move row earlier';
+                up.setAttribute('aria-label', `Move ${rowActionDescription(row)} row earlier`);
+                up.dataset.vgridRowReorder = 'up';
+                const down = document.createElement('button');
+                down.type = 'button';
+                down.textContent = '\u2193';
+                down.title = 'Move row later';
+                down.setAttribute('aria-label', `Move ${rowActionDescription(row)} row later`);
+                down.dataset.vgridRowReorder = 'down';
+                [up, down].forEach(button => {
+                    button.style.minWidth = '24px';
+                    button.style.minHeight = '24px';
+                    button.style.boxSizing = 'border-box';
+                });
+                const dataIndex = !isRemote ? localData.indexOf(row) : offset + index;
+                const canMove = !isRemote ? canReorderRows() : typeof onRowReorder === 'function';
+                up.disabled = !canMove || dataIndex <= 0;
+                down.disabled = !canMove || dataIndex < 0 || (isRemote
+                    ? remoteTotal !== null && dataIndex >= remoteTotal - 1
+                    : dataIndex >= localData.length - 1);
+                td.append(up, down);
+                cells.push(td);
+            }
+            if (hasRowActions) {
+                const td = document.createElement('td');
+                td.className = partClass('row-actions');
+                const definitions = typeof rowActions === 'function' ? rowActions(row) : rowActions;
+                (Array.isArray(definitions) ? definitions : []).forEach(action => {
+                    if (!action || typeof action !== 'object' || typeof action.onClick !== 'function') return;
+                    const button = document.createElement('button');
+                    button.type = 'button';
+                    button.textContent = String(action.label ?? 'Action');
+                    button.setAttribute('aria-label', String(action.ariaLabel ?? action.label ?? 'Action'));
+                    button.disabled = action.disabled === true;
+                    button.style.minWidth = '24px';
+                    button.style.minHeight = '24px';
+                    button.style.boxSizing = 'border-box';
+                    button.dataset.vgridRowAction = '1';
+                    button.addEventListener('click', event => {
+                        event.stopPropagation();
+                        action.onClick({ row, event, grid: instance });
+                    }, { signal });
+                    td.appendChild(button);
+                });
+                cells.push(td);
+            }
             if (hasPanels) {
                 placeToggleCells(cells, sub => {
                     const td = document.createElement('td');
@@ -1982,10 +2187,153 @@ function vGrid(config) {
                     return td;
                 });
             }
+            if (cellSelectionActive) cells.forEach(cell => {
+                if (cell.tagName !== 'TD') return;
+                if (!cell.hasAttribute('role')) cell.setAttribute('role', 'gridcell');
+                if (!cell.hasAttribute('aria-selected')) cell.setAttribute('aria-selected', 'false');
+            });
             cells.forEach(cell => tr.appendChild(cell));
             tbody.appendChild(tr);
         });
     };
+
+    const rowActionDescription = row => {
+        const column = rowKeyColumn || activeColumns[0];
+        const value = column ? row?.[column.name] : '';
+        return value === undefined || value === null || value === '' ? 'this' : String(value);
+    };
+
+    const hasActiveSort = () => sortCriteria.some(sort => activeColumns.some(column => column.name === sort.column));
+    const canReorderRows = () => !isRemote && !hasActiveSort() && activeFilterValues().length === 0
+        && externalFilterInputs.every(({ element }) => !element.value);
+
+    let cellSelectionAnchor = null;
+    let cellSelectionFocus = null;
+    const visibleCell = (rowIndex, columnIndex) => tbody.querySelector(`[data-vgrid-cell-row="${rowIndex}"][data-vgrid-cell-column="${columnIndex}"]`);
+    const updateCellSelection = () => {
+        if (!cellSelectionAnchor || !cellSelectionFocus) return;
+        const rowStart = Math.min(cellSelectionAnchor.row, cellSelectionFocus.row);
+        const rowEnd = Math.max(cellSelectionAnchor.row, cellSelectionFocus.row);
+        const colStart = Math.min(cellSelectionAnchor.column, cellSelectionFocus.column);
+        const colEnd = Math.max(cellSelectionAnchor.column, cellSelectionFocus.column);
+        tbody.querySelectorAll('[data-vgrid-cell-row]').forEach(cell => {
+            const row = Number(cell.dataset.vgridCellRow);
+            const column = Number(cell.dataset.vgridCellColumn);
+            cell.setAttribute('aria-selected', String(row >= rowStart && row <= rowEnd && column >= colStart && column <= colEnd));
+            cell.tabIndex = cell === visibleCell(cellSelectionFocus.row, cellSelectionFocus.column) ? 0 : -1;
+        });
+    };
+    const selectCell = (cell, extend = false) => {
+        const point = { row: Number(cell.dataset.vgridCellRow), column: Number(cell.dataset.vgridCellColumn) };
+        if (!extend || !cellSelectionAnchor) cellSelectionAnchor = point;
+        cellSelectionFocus = point;
+        updateCellSelection();
+        cell.focus();
+    };
+    if (cellSelectionActive) {
+        tbody.addEventListener('click', event => {
+            if (event.target.closest('a, button, input, select')) return;
+            const cell = event.target.closest('[data-vgrid-cell-row]');
+            if (cell) selectCell(cell);
+        }, { signal });
+        tbody.addEventListener('focusin', event => {
+            const cell = event.target.closest('[data-vgrid-cell-row]');
+            if (!cell) return;
+            if (!cellSelectionFocus || visibleCell(cellSelectionFocus.row, cellSelectionFocus.column) !== cell) {
+                cellSelectionAnchor = { row: Number(cell.dataset.vgridCellRow), column: Number(cell.dataset.vgridCellColumn) };
+                cellSelectionFocus = cellSelectionAnchor;
+                updateCellSelection();
+            }
+        }, { signal });
+        tbody.addEventListener('keydown', event => {
+            const cell = event.target.closest('[data-vgrid-cell-row]');
+            if (!cell) return;
+            const delta = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[event.key];
+            if (!delta) return;
+            const row = Number(cell.dataset.vgridCellRow) + delta[0];
+            const column = Number(cell.dataset.vgridCellColumn) + delta[1];
+            const next = visibleCell(row, column);
+            if (!next) return;
+            event.preventDefault();
+            selectCell(next, event.shiftKey);
+            if (event.shiftKey) {
+                const rows = Math.abs(cellSelectionFocus.row - cellSelectionAnchor.row) + 1;
+                const columns = Math.abs(cellSelectionFocus.column - cellSelectionAnchor.column) + 1;
+                announceResultCount(`Selected ${rows} row${rows === 1 ? '' : 's'} by ${columns} column${columns === 1 ? '' : 's'}.`);
+            }
+        }, { signal });
+        element.addEventListener('copy', event => {
+            if (!cellSelectionFocus || !event.clipboardData || !document.activeElement.closest?.('[data-vgrid-cell-row]')) return;
+            const rowStart = Math.min(cellSelectionAnchor.row, cellSelectionFocus.row);
+            const rowEnd = Math.max(cellSelectionAnchor.row, cellSelectionFocus.row);
+            const colStart = Math.min(cellSelectionAnchor.column, cellSelectionFocus.column);
+            const colEnd = Math.max(cellSelectionAnchor.column, cellSelectionFocus.column);
+            const text = Array.from({ length: rowEnd - rowStart + 1 }, (_, row) =>
+                Array.from({ length: colEnd - colStart + 1 }, (_, column) => visibleCell(rowStart + row, colStart + column)?.textContent.trim() ?? '').join('\t')
+            ).join('\n');
+            event.clipboardData.setData('text/plain', text);
+            event.preventDefault();
+        }, { signal });
+    }
+
+    tbody.addEventListener('click', event => {
+        const reorderButton = event.target.closest('[data-vgrid-row-reorder]');
+        if (reorderButton) {
+            event.preventDefault();
+            event.stopPropagation();
+            const tr = reorderButton.closest('tr.vgrid-row');
+            const row = tr && rowData.get(tr);
+            const direction = reorderButton.dataset.vgridRowReorder === 'up' ? -1 : 1;
+            const displayedIndex = currentRows.indexOf(row);
+            if (!row || displayedIndex < 0) return;
+            const from = isRemote ? currentOffset + displayedIndex : localData.indexOf(row);
+            const to = from + direction;
+            if (isRemote) {
+                if (typeof onRowReorder !== 'function') return;
+                onRowReorder({ row, from, to, rows: currentRows.slice() });
+                announceResultCount(`Requested row move from position ${from + 1} to ${to + 1}.`);
+                return;
+            }
+            if (!canReorderRows() || to < 0 || to >= localData.length) return;
+            localData.splice(from, 1);
+            localData.splice(to, 0, row);
+            render();
+            const movedRow = [...tbody.querySelectorAll('tr.vgrid-row')].find(candidate => rowData.get(candidate) === row);
+            const focusButton = movedRow?.querySelector(`[data-vgrid-row-reorder="${direction < 0 ? 'up' : 'down'}"]`)
+                || tbody.querySelector('[data-vgrid-row-reorder]');
+            focusButton?.focus();
+            announceResultCount(`Moved row from position ${from + 1} to ${to + 1}.`);
+            return;
+        }
+        const interactive = event.target.closest('button, a, input, select, textarea');
+        if (interactive) return;
+        const tr = event.target.closest('tr.vgrid-row');
+        const row = tr && rowData.get(tr);
+        if (row) onRowClick?.({ row, event });
+    }, { signal });
+    tbody.addEventListener('dblclick', event => {
+        if (event.target.closest('button, a, input, select, textarea')) return;
+        const tr = event.target.closest('tr.vgrid-row');
+        const row = tr && rowData.get(tr);
+        if (row) onRowDblClick?.({ row, event });
+    }, { signal });
+    tbody.addEventListener('keydown', event => {
+        const isClick = event.key === 'Enter' || event.key === ' ';
+        const isDoubleClick = event.key === 'Enter' && event.shiftKey;
+        if (!isClick) return;
+        if (event.target.closest('button, a, input, select, textarea')) return;
+        const tr = event.target.closest('tr.vgrid-row');
+        if (!tr || (!cellSelectionActive && event.target !== tr) || (cellSelectionActive && !event.target.closest('[data-vgrid-cell-row]'))) return;
+        const row = rowData.get(tr);
+        if (!row) return;
+        if (isDoubleClick && onRowDblClick) {
+            event.preventDefault();
+            onRowDblClick({ row, event });
+        } else if (isClick && onRowClick) {
+            event.preventDefault();
+            onRowClick({ row, event });
+        }
+    }, { signal });
 
     updateTableRowMetadata = () => {
         if (destroyed) return;
@@ -2129,6 +2477,11 @@ function vGrid(config) {
 
     let sortColIndex = sortBy ? activeColumns.findIndex(c => c.name === sortBy.column) : null;
     let sortOrder    = sortBy ? (sortBy.order || 'asc') : null;
+    let sortCriteria = (Array.isArray(sortBy) ? sortBy : sortBy ? [sortBy] : [])
+        .filter(sort => sort && typeof sort.column === 'string' && activeColumns.some(column => column.name === sort.column && column.sort !== false))
+        .map(sort => ({ column: sort.column, order: sort.order === 'desc' ? 'desc' : 'asc' }));
+    sortColIndex = sortCriteria.length ? activeColumns.findIndex(column => column.name === sortCriteria[0].column) : null;
+    sortOrder = sortCriteria[0]?.order ?? null;
     let currentPage  = 1;
     let fetchAbort   = null;
     let filterTimer  = null;
@@ -2177,9 +2530,10 @@ function vGrid(config) {
         });
         const payload = { page: currentPage };
         if (ps) payload.limit = ps;
-        if (sortColIndex !== null && sortColIndex !== -1) {
-            payload.sort = activeColumns[sortColIndex].name;
-            payload.dir  = sortOrder || 'asc';
+        if (sortCriteria.length) {
+            const sorts = sortCriteria.filter(sort => activeColumns.some(column => column.name === sort.column));
+            payload.sort = sorts.map(sort => sort.column).join(',');
+            payload.dir  = sorts.map(sort => sort.order).join(',');
         }
         if (activeColumns.length !== columns.length) payload.columns = activeColumns.map(column => column.name).join(',');
         Object.assign(payload, filter, extra);
@@ -2246,6 +2600,7 @@ function vGrid(config) {
                 const reportedTotal = toCount(total);
                 const totalIsKnown = Number.isInteger(reportedTotal) && reportedTotal >= 0;
                 const totalRows = reportedTotal ?? rows.length;
+                remoteTotal = totalIsKnown ? reportedTotal : null;
                 const pageSize  = Number.isInteger(toCount(ps2)) && toCount(ps2) > 0 ? toCount(ps2) : null;
                 const requestedPageSize = toPageSize(payload.limit) || currentPageSize();
                 const rowPageSize = pageSize || requestedPageSize || null;
@@ -2308,6 +2663,9 @@ function vGrid(config) {
             if (ariaLabel) b.setAttribute('aria-label', ariaLabel);
             b.disabled = disabled;
             b.dataset.vgridPage = String(page);
+            b.style.minWidth = '24px';
+            b.style.minHeight = '24px';
+            b.style.boxSizing = 'border-box';
             return b;
         };
         pagerEl.appendChild(btn('«', 1, currentPage === 1, false, 'First page'));
@@ -2362,13 +2720,14 @@ function vGrid(config) {
     });
 
     const sortRows = rows => {
-        if (sortColIndex === null || sortColIndex === -1) return rows;
-        const col = activeColumns[sortColIndex];
-        if (!col) return rows;
+        const sorts = sortCriteria.map(sort => ({ ...sort, col: activeColumns.find(column => column.name === sort.column) })).filter(sort => sort.col);
+        if (!sorts.length) return rows;
         return rows.sort((a, b) => {
-            const aVal = cellText(a, col);
-            const bVal = cellText(b, col);
-            return sortOrder === 'asc' ? compare(aVal, bVal) : compare(bVal, aVal);
+            for (const sort of sorts) {
+                const result = compare(cellText(a, sort.col), cellText(b, sort.col));
+                if (result) return sort.order === 'asc' ? result : -result;
+            }
+            return 0;
         });
     };
 
@@ -2591,11 +2950,19 @@ function vGrid(config) {
 
     const updateSortIndicators = () => {
         columnHeaders.forEach((th, i) => {
-            const active = i === sortColIndex;
-            if (th.hasAttribute('data-vgrid-sort')) th.setAttribute('aria-sort', active ? (sortOrder === 'asc' ? 'ascending' : 'descending') : 'none');
-            else th.removeAttribute('aria-sort');
+            const priority = sortCriteria.findIndex(sort => sort.column === activeColumns[i]?.name);
+            const sort = priority < 0 ? null : sortCriteria[priority];
+            if (th.hasAttribute('data-vgrid-sort')) {
+                if (priority === 0) th.setAttribute('aria-sort', sort.order === 'asc' ? 'ascending' : 'descending');
+                else if (priority === -1) th.setAttribute('aria-sort', 'none');
+                else th.removeAttribute('aria-sort');
+                const button = th.querySelector('button');
+                if (button) button.setAttribute('aria-label', sort
+                    ? `Sort by ${columnHeaderLabels[i]}, priority ${priority + 1}, ${sort.order === 'asc' ? 'ascending' : 'descending'}`
+                    : `Sort by ${columnHeaderLabels[i]}`);
+            } else th.removeAttribute('aria-sort');
             const indicator = th.querySelector('[data-vgrid-sort-indicator]');
-            if (indicator) indicator.textContent = active ? ` ${sortOrder === 'asc' ? '▲' : '▼'}` : '';
+            if (indicator) indicator.textContent = sort ? ` ${sortCriteria.length > 1 ? `${priority + 1} ` : ''}${sort.order === 'asc' ? '▲' : '▼'}` : '';
         });
     };
 
@@ -2603,25 +2970,24 @@ function vGrid(config) {
         updateSortIndicators();
         if (externalSortColumnElement) externalSortColumnElement.value = activeColumns[sortColIndex]?.name ?? '';
         if (externalSortDirectionElement) externalSortDirectionElement.value = sortOrder || 'asc';
-        onSort?.({ column: activeColumns[sortColIndex]?.name, order: sortOrder });
+        const primary = sortCriteria[0];
+        const result = { column: primary?.column, order: primary?.order };
+        if (sortCriteria.length > 1) result.sorts = sortCriteria.map(sort => ({ ...sort }));
+        onSort?.(result);
         render();
     };
 
     const rebuildColumns = () => {
         const keptFilters = keptFilterValues();
-        const sortName = sortColIndex !== null && sortColIndex !== -1 ? activeColumns[sortColIndex]?.name : null;
+        const keptSorts = sortCriteria.map(sort => ({ ...sort }));
 
         activeColumns = columns.filter(column => column.active !== false);
         totalCols = activeColumns.length + colOffset;
         computeToggleIndexes();
 
-        if (sortName) {
-            sortColIndex = activeColumns.findIndex(column => column.name === sortName);
-            if (sortColIndex === -1) {
-                sortColIndex = null;
-                sortOrder = null;
-            }
-        }
+        sortCriteria = keptSorts.filter(sort => activeColumns.some(column => column.name === sort.column && column.sort !== false));
+        sortColIndex = sortCriteria.length ? activeColumns.findIndex(column => column.name === sortCriteria[0].column) : null;
+        sortOrder = sortCriteria[0]?.order ?? null;
 
         buildColgroup();
         buildHeaderRow();
@@ -2675,7 +3041,8 @@ function vGrid(config) {
 
     const dividerIndexAt = event => {
         const index = headerCells.findIndex(th => Math.abs(th.getBoundingClientRect().right - event.clientX) <= EDGE_TOLERANCE);
-        return index === headerCells.length - 1 ? -1 : index;
+        if (index < 0 || !isAdjustableColumn(index)) return -1;
+        return headerCells.slice(index + 1).some((unused, offset) => isAdjustableColumn(index + offset + 1)) ? index : -1;
     };
 
     const resizableRow = target => {
@@ -2687,8 +3054,8 @@ function vGrid(config) {
     const resizeColumns = delta => {
         const { index, widths } = resizeState;
         const next = widths.slice();
-        const room = i => isToggleCell(i) ? 0 : Math.max(0, widths[i] - MIN_COLUMN_WIDTH);
-        const give = i => isToggleCell(i) ? 0 : widths[i];
+        const room = i => !isAdjustableColumn(i) ? 0 : Math.max(0, widths[i] - MIN_COLUMN_WIDTH);
+        const give = i => isAdjustableColumn(i) ? widths[i] : 0;
         let available = 0;
         for (let i = index + 1; i < widths.length; i++) available += delta > 0 ? room(i) : give(i);
         const move = delta > 0 ? Math.min(delta, available) : Math.min(-delta, room(index));
@@ -2700,6 +3067,24 @@ function vGrid(config) {
         }
         next[index] = widths[index] + (delta > 0 ? move : -move);
         applyColumnWidths(next);
+    };
+
+    const resizeColumnBy = (column, delta) => {
+        const position = activeColumns.indexOf(column);
+        if (position < 0 || activeColumns.length < 2) return;
+        freezeColumns();
+        if (!columnsFrozen || !frozenWidths) return;
+        let index = headerCells.indexOf(columnHeaders[position]);
+        let adjustment = delta;
+        if (position === activeColumns.length - 1) {
+            index = headerCells.indexOf(columnHeaders[position - 1]);
+            adjustment = -delta;
+        }
+        if (index < 0) return;
+        resizeState = { index, widths: frozenWidths.slice() };
+        resizeColumns(adjustment);
+        resizeState = null;
+        announceResultCount(`${column.label || column.name} column width ${Math.round(frozenWidths[headerCells.indexOf(columnHeaders[position])])} pixels.`);
     };
 
     const setCursorHost = host => {
@@ -2774,7 +3159,7 @@ function vGrid(config) {
             return next;
         };
         const kept = keptFilterValues();
-        const sortName = sortColIndex !== null && sortColIndex !== -1 ? activeColumns[sortColIndex]?.name : null;
+        const keptSorts = sortCriteria.map(sort => ({ ...sort }));
         const widths = permute(columnCols.map(col => col.style.width));
         [...element.querySelectorAll(':scope > tbody > tr')]
             .filter(tr => tr.children.length === headerCells.length)
@@ -2785,7 +3170,9 @@ function vGrid(config) {
         columns.splice(columns.indexOf(moved), 1);
         columns.splice(anchor ? columns.indexOf(anchor) : columns.indexOf(last) + 1, 0, moved);
         activeColumns = columns.filter(column => column.active !== false);
-        if (sortName) sortColIndex = activeColumns.findIndex(column => column.name === sortName);
+        sortCriteria = keptSorts.filter(sort => activeColumns.some(column => column.name === sort.column));
+        sortColIndex = sortCriteria.length ? activeColumns.findIndex(column => column.name === sortCriteria[0].column) : null;
+        sortOrder = sortCriteria[0]?.order ?? null;
         buildHeaderRow();
         if (columnsFrozen) headerCells.forEach(th => th.removeAttribute('width'));
         updateSortIndicators();
@@ -2930,6 +3317,7 @@ function vGrid(config) {
             if (idx === -1) return;
             sortOrder = idx === sortColIndex ? (sortOrder || 'asc') : (externalSortDirectionElement?.value || 'asc');
             sortColIndex = idx;
+            sortCriteria = [{ column: activeColumns[idx].name, order: sortOrder }];
             currentPage = 1;
             applySort();
         }, { signal });
@@ -2939,6 +3327,7 @@ function vGrid(config) {
         externalSortDirectionElement.addEventListener('change', () => {
             if (sortColIndex === null || sortColIndex === -1) return;
             sortOrder = externalSortDirectionElement.value === 'desc' ? 'desc' : 'asc';
+            sortCriteria = [{ column: activeColumns[sortColIndex].name, order: sortOrder }];
             currentPage = 1;
             applySort();
         }, { signal });
@@ -2992,7 +3381,8 @@ function vGrid(config) {
             const idx = activeColumns.findIndex(c => c.name === column);
             if (idx === -1) { console.warn(`vGrid: column "${column}" not found`); return instance; }
             sortColIndex = idx;
-            sortOrder = order;
+            sortOrder = order === 'desc' ? 'desc' : 'asc';
+            sortCriteria = [{ column, order: sortOrder }];
             applySort();
             return instance;
         },
@@ -3053,6 +3443,10 @@ function vGrid(config) {
             else element.setAttribute('aria-labelledby', originalAriaLabelledBy);
             if (originalAriaRowCount === null) element.removeAttribute('aria-rowcount');
             else element.setAttribute('aria-rowcount', originalAriaRowCount);
+            if (originalRole === null) element.removeAttribute('role');
+            else element.setAttribute('role', originalRole);
+            if (originalAriaMultiSelectable === null) element.removeAttribute('aria-multiselectable');
+            else element.setAttribute('aria-multiselectable', originalAriaMultiSelectable);
             settingsPanel.remove();
             settingsButton?.remove();
             refreshButton?.remove();

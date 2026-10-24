@@ -252,6 +252,20 @@ button.vgrid-toggle-subgrid {
     outline-offset: 1px;
 }
 
+.vgrid [role="gridcell"][data-vgrid-cell-row]:focus-visible {
+    outline: 2px solid AccentColor;
+    outline-offset: -2px;
+}
+
+.vgrid [role="gridcell"][aria-selected="true"] {
+    box-shadow: inset 0 0 0 1px currentColor;
+}
+
+.vgrid tr[data-vgrid-clickable]:focus-visible {
+    outline: 2px solid AccentColor;
+    outline-offset: -2px;
+}
+
 .vgrid-panel-menu,
 .vgrid-filter-mode-menu {
     position: fixed;
