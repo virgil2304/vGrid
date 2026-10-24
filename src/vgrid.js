@@ -1,4 +1,4 @@
-/* vGrid v1.0.0.5.53 | Last updated: 2026-10-24 */
+/* vGrid v1.0.0.5.55 | Last updated: 2026-10-24 */
 export function vGrid(config) {
 
     const { el, caption, columns: columnsConfig = [], data = [], dataSource, method = 'GET', headers = {},
@@ -379,6 +379,11 @@ export function vGrid(config) {
     const element = target.tagName === 'TABLE' ? target : document.createElement('table');
     const createdTable = element !== target;
     const originalAriaDescribedBy = element.getAttribute('aria-describedby');
+    const originalAriaLabel = element.getAttribute('aria-label');
+    const originalAriaLabelledBy = element.getAttribute('aria-labelledby');
+    const originalAriaRowCount = element.getAttribute('aria-rowcount');
+    const originalCaptionText = element.caption?.textContent.replace(/\s+/g, ' ').trim() || '';
+    let accessibleCaptionText = originalCaptionText;
     const hasSortableColumns = columns.some(column => column.sort !== false);
     let sortInstructions = null;
     if (hasSortableColumns) {
@@ -675,13 +680,21 @@ export function vGrid(config) {
     if (caption || captionActions) {
         const tr = document.createElement('tr');
         tr.className = partClass('caption');
+        tr.setAttribute('role', 'presentation');
         const td = document.createElement('td');
         td.colSpan = totalCols;
-        if (caption) td.innerHTML = caption;
+        if (caption) {
+            td.innerHTML = caption;
+            accessibleCaptionText = td.textContent.replace(/\s+/g, ' ').trim() || accessibleCaptionText;
+        }
         if (captionActions) td.insertBefore(makeActions(), td.firstChild);
         tr.appendChild(td);
         trackColSpan(td);
         thead.appendChild(tr);
+    }
+
+    if (accessibleCaptionText && !originalAriaLabel?.trim() && !originalAriaLabelledBy?.trim()) {
+        element.setAttribute('aria-label', accessibleCaptionText);
     }
 
     if (externalActions) actionsElement.replaceChildren(...actionButtons);
@@ -768,6 +781,7 @@ export function vGrid(config) {
     const makeBar = () => {
         const tr = document.createElement('tr');
         tr.className = partClass('pagination');
+        tr.setAttribute('role', 'presentation');
         const td = document.createElement('td');
         td.colSpan = totalCols;
         const left = document.createElement('span');
@@ -820,6 +834,8 @@ export function vGrid(config) {
     const headerCells = [];
     const columnHeaders = [];
     const columnHeaderLabels = [];
+    let tableRowMetadata = { partial: false, total: null, offset: 0 };
+    let updateTableRowMetadata = () => {};
 
     const buildHeaderRow = () => {
         headerCells.length = 0;
@@ -889,7 +905,10 @@ export function vGrid(config) {
     const filterClears = [];
     const filterDefaults = new Map();
     const filterRowElement = filterRow ? document.createElement('tr') : null;
-    if (filterRowElement) filterRowElement.className = partClass('filter');
+    if (filterRowElement) {
+        filterRowElement.className = partClass('filter');
+        filterRowElement.setAttribute('role', 'presentation');
+    }
 
     const filterModeKeys = new Map();
     const filterModeCache = new WeakMap();
@@ -1606,6 +1625,7 @@ export function vGrid(config) {
         entry.fetchAbort?.abort();
         entry.fetchAbort = null;
         entry.panelRow.remove();
+        updateTableRowMetadata();
     };
 
     const closePanel = (sub, tr) => {
@@ -1679,6 +1699,7 @@ export function vGrid(config) {
         panelRow.appendChild(cell);
         const attached = panelRowsOf(tr);
         (attached[attached.length - 1] || tr).after(panelRow);
+        updateTableRowMetadata();
         slide.style.height = '0px';
         showPanelContent(sub, entry, panel, row);
         entry.observer = new ResizeObserver(() => {
@@ -1966,10 +1987,40 @@ export function vGrid(config) {
         });
     };
 
+    updateTableRowMetadata = () => {
+        if (destroyed) return;
+        const headRows = Array.from(thead.rows).filter(row => row.getAttribute('role') !== 'presentation');
+        const bodyRows = Array.from(tbody.rows).filter(row => row.getAttribute('role') !== 'presentation' && !row.dataset.vgridLoadingSpace);
+        const dataRows = bodyRows.filter(row => row.classList.contains(partClass('row')));
+        const detailRows = bodyRows.filter(row => row.dataset.vgridSubgrid);
+        const emptyRows = bodyRows.filter(row => row.dataset.vgridEmpty);
+        const { partial, total, offset } = tableRowMetadata;
+
+        if (!partial) {
+            element.removeAttribute('aria-rowcount');
+            [...headRows, ...bodyRows].forEach(row => row.removeAttribute('aria-rowindex'));
+            return;
+        }
+
+        if (total === -1) element.setAttribute('aria-rowcount', '-1');
+        else if (Number.isInteger(total) && total >= 0) element.setAttribute('aria-rowcount', String(headRows.length + total + detailRows.length + emptyRows.length));
+        else element.removeAttribute('aria-rowcount');
+
+        if (!Number.isInteger(offset) || offset < 0 || (total !== -1 && (!Number.isInteger(total) || total < 0 || offset + dataRows.length > total))) {
+            [...headRows, ...bodyRows].forEach(row => row.removeAttribute('aria-rowindex'));
+            return;
+        }
+
+        headRows.forEach((row, index) => row.setAttribute('aria-rowindex', String(index + 1)));
+        let rowIndex = headRows.length + offset + 1;
+        bodyRows.forEach(row => row.setAttribute('aria-rowindex', String(rowIndex++)));
+    };
+
     const loadingSpacer = () => {
         const tr = document.createElement('tr');
         tr.dataset.vgridLoadingSpace = '1';
         tr.className = partClass('loading-space');
+        tr.setAttribute('role', 'presentation');
         const td = document.createElement('td');
         td.colSpan = totalCols;
         tr.appendChild(td);
@@ -2022,6 +2073,7 @@ export function vGrid(config) {
     if (bottomActions) {
         const tr = document.createElement('tr');
         tr.className = partClass('actions-row');
+        tr.setAttribute('role', 'presentation');
         const td = document.createElement('td');
         td.colSpan = totalCols;
         td.appendChild(makeActions());
@@ -2049,6 +2101,11 @@ export function vGrid(config) {
     gridWrapper.appendChild(settingsPanel);
     subgrids.forEach(sub => gridWrapper.appendChild(sub.menu));
     if (filterRowElement) gridWrapper.appendChild(filterModeMenu.menu);
+    const resultStatus = document.createElement('span');
+    resultStatus.setAttribute('role', 'status');
+    resultStatus.setAttribute('aria-atomic', 'true');
+    resultStatus.style.cssText = 'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;';
+    gridWrapper.appendChild(resultStatus);
     loadingIndicator = document.createElement('output');
     loadingIndicator.setAttribute('aria-live', 'polite');
     loadingIndicator.hidden = true;
@@ -2075,6 +2132,7 @@ export function vGrid(config) {
     let currentPage  = 1;
     let fetchAbort   = null;
     let filterTimer  = null;
+    let resultStatusTimer = null;
     let resizeState  = null;
     let columnsFrozen = false;
     let freezePending = false;
@@ -2156,6 +2214,13 @@ export function vGrid(config) {
         placeLoadingIndicator();
     };
 
+    const announceResultCount = (message, delay = 0) => {
+        clearTimeout(resultStatusTimer);
+        resultStatusTimer = setTimeout(() => {
+            if (!destroyed && resultStatus.textContent !== message) resultStatus.textContent = message;
+        }, delay);
+    };
+
     const fetchData = () => {
         if (fetchAbort) fetchAbort.abort();
         fetchAbort = new AbortController();
@@ -2178,11 +2243,23 @@ export function vGrid(config) {
                 const { data: rows, total, page: pg, limit: ps2, summary } = body;
                 if (rows === undefined) throw new Error('The response has no "data" field');
                 if (!Array.isArray(rows)) throw new Error('The "data" field is not an array');
-                const totalRows = toCount(total) ?? rows.length;
-                const pageSize  = toCount(ps2) > 0 ? toCount(ps2) : null;
-                const pageNo    = toCount(pg) > 0 ? toCount(pg) : currentPage;
+                const reportedTotal = toCount(total);
+                const totalIsKnown = Number.isInteger(reportedTotal) && reportedTotal >= 0;
+                const totalRows = reportedTotal ?? rows.length;
+                const pageSize  = Number.isInteger(toCount(ps2)) && toCount(ps2) > 0 ? toCount(ps2) : null;
+                const requestedPageSize = toPageSize(payload.limit) || currentPageSize();
+                const rowPageSize = pageSize || requestedPageSize || null;
+                const responsePage = toCount(pg);
+                const pageNo = Number.isInteger(responsePage) && responsePage > 0 ? responsePage : currentPage;
                 currentPage = pageNo;
-                buildRows(rows, pageSize ? (pageNo - 1) * pageSize : 0);
+                const rowOffset = rowPageSize ? (pageNo - 1) * rowPageSize : pageNo === 1 ? 0 : null;
+                const rowCount = totalIsKnown ? reportedTotal : -1;
+                const partial = totalIsKnown
+                    ? rowOffset === null ? pageNo > 1 || rows.length < reportedTotal : rowOffset > 0 || rowOffset + rows.length < reportedTotal
+                    : true;
+                tableRowMetadata = { partial, total: rowCount, offset: rowOffset };
+                buildRows(rows, rowOffset ?? 0);
+                updateTableRowMetadata();
                 hideLoading();
                 freezeColumns();
                 updatePageSizeOptions(totalRows);
@@ -2194,12 +2271,15 @@ export function vGrid(config) {
                 }
                 if (pageSize) {
                     const totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
-                    const from = totalRows ? (pageNo - 1) * pageSize + 1 : 0;
-                    const to   = Math.min((pageNo - 1) * pageSize + pageSize, totalRows);
-                    infoEls.forEach(el => { el.textContent = `Showing ${from}–${to} of ${totalRows}`; });
+                    const from = rows.length ? (pageNo - 1) * pageSize + 1 : 0;
+                    const returnedTo = rows.length ? from + rows.length - 1 : 0;
+                    const to = totalIsKnown ? Math.min(returnedTo, totalRows) : returnedTo;
+                    const countText = totalIsKnown ? `Showing ${from}–${to} of ${totalRows}` : `Showing rows ${from}–${to}`;
+                    infoEls.forEach(el => { el.textContent = countText; });
+                    announceResultCount(totalIsKnown ? `Showing ${from}–${to} of ${totalRows} results.` : `Showing rows ${from}–${to}; total count unknown.`);
                     renderPagers(totalPages);
                     onPage?.({ page: pageNo, rowsPerPage: pageSize, total: totalRows });
-                }
+                } else announceResultCount(totalIsKnown ? `${totalRows} results.` : `Showing ${rows.length} rows; total count unknown.`);
                 onReady?.({ total: totalRows, rows: rows.length });
             })
             .catch(err => {
@@ -2308,15 +2388,20 @@ export function vGrid(config) {
         if (currentPage < 1) currentPage = 1;
 
         const start = ps ? (currentPage - 1) * ps : 0;
-        buildRows(ps ? filtered.slice(start, start + ps) : filtered, start);
+        const visibleRows = ps ? filtered.slice(start, start + ps) : filtered;
+        tableRowMetadata = { partial: start > 0 || start + visibleRows.length < filtered.length, total: filtered.length, offset: start };
+        buildRows(visibleRows, start);
+        updateTableRowMetadata();
 
         if (ps) {
             const from = filtered.length ? start + 1 : 0;
             const to   = Math.min(start + ps, filtered.length);
-            infoEls.forEach(el => { el.textContent = `Showing ${from}–${to} of ${filtered.length}`; });
+            const countText = `Showing ${from}–${to} of ${filtered.length}`;
+            infoEls.forEach(el => { el.textContent = countText; });
+            announceResultCount(`${countText} results.`, 250);
             renderPagers(totalPages);
             onPage?.({ page: currentPage, rowsPerPage: ps, total: filtered.length });
-        }
+        } else announceResultCount(`${filtered.length} results.`, 250);
         if (onReady) {
             const ready = { total: filtered.length, rows: currentRows.length };
             queueMicrotask(() => { if (!destroyed) onReady(ready); });
@@ -2935,6 +3020,7 @@ export function vGrid(config) {
             filterModeKeys.clear();
             clearTimeout(filterTimer);
             clearTimeout(loadingShowTimer);
+            clearTimeout(resultStatusTimer);
             tbody.replaceChildren();
             localData = [];
             currentRows = [];
@@ -2955,11 +3041,18 @@ export function vGrid(config) {
             cancelAnimationFrame(columnFrame);
             paginationBars.length = 0;
             loadingIndicator.remove();
+            resultStatus.remove();
             sortInstructions?.remove();
             if (sortInstructions) {
                 if (originalAriaDescribedBy === null) element.removeAttribute('aria-describedby');
                 else element.setAttribute('aria-describedby', originalAriaDescribedBy);
             }
+            if (originalAriaLabel === null) element.removeAttribute('aria-label');
+            else element.setAttribute('aria-label', originalAriaLabel);
+            if (originalAriaLabelledBy === null) element.removeAttribute('aria-labelledby');
+            else element.setAttribute('aria-labelledby', originalAriaLabelledBy);
+            if (originalAriaRowCount === null) element.removeAttribute('aria-rowcount');
+            else element.setAttribute('aria-rowcount', originalAriaRowCount);
             settingsPanel.remove();
             settingsButton?.remove();
             refreshButton?.remove();
