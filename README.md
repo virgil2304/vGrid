@@ -1,6 +1,14 @@
 # vGrid
 
-**vGrid**, is a standalone JavaScript grid library. The core has no runtime framework dependencies. It can be installed from npm or GitHub, used directly from a browser script, or mounted through the included React and Vue adapters.
+**vGrid** is a standalone JavaScript data grid. The core has no runtime dependencies. It can be installed from npm or GitHub, used directly from a browser script, or mounted through the included React and Vue adapters.
+
+- Local rows from an array, or remote rows from your server, which pages, sorts and filters
+- Sorting on one or several columns, a filter row with drop-downs and filter modes, page size and pager
+- Column resizing, reordering and hiding, with the chosen columns and their order remembered in the browser
+- Detail panels per row: HTML, text, or a nested grid with its own paging
+- Row actions, row click events, row reordering, cell selection with copy
+- Download as a CSV made in the browser or as a file from your server, and print
+- Keyboard operable, with table semantics, sort states and result counts for screen readers
 
 The npm package identifier is `vgrid`. The JavaScript API is `vGrid(config)`. The React component is exported as `VGRID` and the Vue component as `vGrid`, each as both a named and the default export.
 
@@ -68,7 +76,7 @@ const grid = vGrid(config);
 grid?.reload([{ name: 'Grace Hopper', email: 'grace@example.com' }]);
 ```
 
-`vGridOptions` describes the `config` passed to a framework adapter, which supplies its own host element. Invalid grid configuration returns `null`. TypeScript React apps also need `@types/react` matching their React version.
+`vGridOptions` describes the `config` passed to a framework adapter, which supplies its own host element. `vGrid()` returns `null` when the grid cannot start: no host element, or a column named after a reserved request parameter. Other invalid values log a `vGrid:` error in the console and the default is used. TypeScript React apps also need `@types/react` matching their React version.
 
 ## React
 
@@ -178,15 +186,39 @@ Jest in its default CommonJS mode and other `require`-based tooling pick up thes
 
 ## Remote data
 
-When `dataSource` is set, vGrid requests rows with `fetch` using the configured `method` and `headers`. If the page contains `<meta name="csrf-token" content="...">` and the request stays on the same origin, vGrid adds an `X-CSRF-TOKEN` header automatically unless `headers` already provides one. This matches the Laravel convention and has no effect on pages without that meta tag.
+When `dataSource` is set, your server pages, sorts and filters, and vGrid shows one page at a time:
 
-## Browser support
+```js
+vGrid({
+    el: '#orders',
+    dataSource: '/api/orders',
+    rowsPerPage: 25,
+    columns: [
+        { name: 'number', label: 'Order' },
+        { name: 'status', label: 'Status' },
+        { name: 'total', label: 'Total' },
+    ],
+});
+```
 
-The core targets evergreen browsers. The settings panel and subgrid menus use the native Popover API, available in Chrome 114, Safari 17, Firefox 125 and later. DOM test environments such as jsdom do not implement it, so component tests that open these panels need a popover polyfill.
+```text
+GET /api/orders?page=2&limit=25&sort=total&dir=desc&status=paid&lang=en
+```
+
+```json
+{ "data": [{ "number": "A-1026", "status": "paid", "total": 120 }], "total": 1834 }
+```
+
+- `page` is always sent, `limit` when `rowsPerPage` is set, `sort` and `dir` when a column is sorted (comma-separated for several), and each filled filter under its column name.
+- `lang` is always sent: the grid's `locale` option, else the nearest `lang` attribute on the page, else the browser's language; it is empty when none is found. Subgrid panels and nested grids send the same value.
+- `method: 'POST'` sends the same parameters as a JSON body.
+- If the page contains `<meta name="csrf-token" content="...">` and the request stays on the same origin, vGrid adds an `X-CSRF-TOKEN` header unless `headers` already provides one. This matches the Laravel convention and has no effect on pages without that meta tag.
+
+The full request and response contract is in the [web documentation](https://grid.virgils.org/documentation#remote-data).
 
 ## Browser compatibility
 
-This applies to the files in `dist/` and to the same code loaded through the npm entries. vGrid ships without polyfills or transpiled fallbacks. The minimum versions are set by the native Popover API (`popover`, `popovertarget`, `showPopover()`, `hidePopover()`, `:popover-open`, and the `toggle` event), which the settings panel, filter-mode menu, and subgrid menus require.
+This applies to the files in `dist/` and to the same code loaded through the npm entries. vGrid targets evergreen browsers and ships without polyfills or transpiled fallbacks. The minimum versions are set by the native Popover API (`popover`, `popovertarget`, `showPopover()`, `hidePopover()`, `:popover-open`, and the `toggle` event), which the settings panel, filter-mode menu, and subgrid menus require.
 
 | Browser | Minimum version | Released |
 |---|---|---|
@@ -201,15 +233,15 @@ This applies to the files in `dist/` and to the same code loaded through the npm
 
 On iOS and iPadOS every browser uses WebKit, so Chrome, Firefox, and Edge there follow the Safari row: iOS 17 or later.
 
-Internet Explorer, legacy Edge (EdgeHTML), and Opera Mini are not supported. In browsers older than the versions above, the vGrid's panels and menus do not open and some interactions throw errors.
+Internet Explorer, legacy Edge (EdgeHTML), and Opera Mini are not supported. In browsers older than the versions above, vGrid's panels and menus do not open and some interactions throw errors. DOM test environments such as jsdom do not implement the Popover API either, so component tests that open these panels need a popover polyfill.
 
-All other features the vGrid relies on are older than the Popover API and need nothing extra in the listed versions. These include ES2020 syntax (`?.`, `??`), `fetch` with `AbortController`, `ResizeObserver`, Pointer Events with pointer capture, `replaceChildren()`, flexbox `gap`, `contain: inline-size`, and `Blob` downloads for export.
+All other features vGrid relies on are older than the Popover API and need nothing extra in the listed versions. These include ES2020 syntax (`?.`, `??`), `fetch` with `AbortController`, `ResizeObserver`, Pointer Events with pointer capture, `replaceChildren()`, flexbox `gap`, `contain: inline-size`, and `Blob` downloads for export.
 
-Some styling is progressive enhancement. When a browser lacks the feature, the vGrid still works and only the visual detail differs:
+Some styling is progressive enhancement. When a browser lacks the feature, vGrid still works and only the visual detail differs:
 
 | Feature | Used for | When unsupported |
 |---|---|---|
-| `@starting-style`, `transition-behavior: allow-discrete`, `overlay` | Fade and slide when panels and menus open and close | Panels appear and disappear without animation. Currently this affects Firefox and Safari before 18; `overlay` is Chromium-only. |
+| `@starting-style`, `transition-behavior: allow-discrete`, `overlay` | Fade and slide when panels and menus open and close | Panels appear and disappear without animation. This affects Firefox before 129 and Safari before 17.5; `overlay` is Chromium-only. |
 | `AccentColor` system color | Focus outline color | The browser's default focus ring is shown instead. |
 | `scrollbar-width`, `scrollbar-color` | Thin subgrid scrollbar | `::-webkit-scrollbar` rules style it instead in Safari and older Chromium. |
 | `prefers-reduced-motion` | Shortens transitions | Transitions run at normal speed. |
@@ -246,7 +278,7 @@ React and Vue are optional peer dependencies; install only the framework adapter
 
 ## Package contents
 
-`src/vgrid.js` is the ES module entry and `src/vgrid.css` the stylesheet it uses. `dist/vgrid.cjs` is the CommonJS build, `dist/vgrid.js` and `dist/vgrid.min.js` the browser builds with their source maps, and `dist/vgrid.css` and `dist/vgrid.min.css` the matching stylesheets. `integrations/` holds the React, Vue, and browser adapters, and `types/` the TypeScript declarations for every entry point. Everything ships ready to use: the package has no build step and runs no scripts on install.
+`src/vgrid.js` is the ES module entry and `src/vgrid.css` the stylesheet it uses. `dist/vgrid.cjs` is the CommonJS build, `dist/vgrid.js` and `dist/vgrid.min.js` the browser builds, and `dist/vgrid.css` and `dist/vgrid.min.css` the matching stylesheets; the minified files come with source maps (`vgrid.min.js.map`, `vgrid.min.css.map`). `integrations/` holds the React, Vue, and browser adapters, and `types/` the TypeScript declarations for every entry point. Everything ships ready to use: the package has no build step and runs no scripts on install.
 
 ## License
 

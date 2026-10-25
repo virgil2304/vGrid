@@ -1,4 +1,4 @@
-/* vGrid v1.0.566 */
+/* vGrid v1.0.567 */
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
@@ -71,7 +71,8 @@ function vGrid(config) {
     onRowClick,
     onRowDblClick,
     onRowReorder,
-    namespace
+    namespace,
+    locale
   } = config;
   const columns = Array.isArray(columnsConfig) ? [...columnsConfig] : [];
   const sortByPrimary = Array.isArray(sortBy) ? sortBy[0] : sortBy;
@@ -347,6 +348,24 @@ function vGrid(config) {
   }
   const namePrefix = typeof namespace === "string" && namespace ? namespace : target.id || "";
   const partClass = (part, ...extra) => ["vgrid-" + part, namePrefix ? `${namePrefix}-${part}` : "", ...extra].filter(Boolean).join(" ");
+  const localeTag = (value) => {
+    if (typeof value !== "string" || !value.trim()) return "";
+    try {
+      return Intl.getCanonicalLocales(value.trim())[0] || "";
+    } catch {
+      return "";
+    }
+  };
+  if (locale !== void 0 && locale !== "" && !localeTag(locale)) console.error('vGrid: locale must be a language tag such as "en" or "de-AT".');
+  const nearestLang = () => {
+    for (let node = target; node; node = node.parentElement) {
+      const tag = node.hasAttribute("lang") ? localeTag(node.getAttribute("lang")) : "";
+      if (tag) return tag;
+    }
+    return "";
+  };
+  const browserLang = () => typeof navigator === "undefined" ? "" : [...navigator.languages || [], navigator.language].map(localeTag).find(Boolean) || "";
+  const gridLocale = localeTag(locale) || nearestLang() || browserLang();
   const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
   const sameOriginUrl = (url) => {
     try {
@@ -1586,7 +1605,11 @@ function vGrid(config) {
     const encoded = encodeURIComponent(value);
     const base = panel.idInPath ? `${panel.dataSource.replace(/\/+$/, "")}/${encoded}` : `${panel.dataSource}${panel.dataSource.includes("?") ? "&" : "?"}id=${encoded}`;
     const params = withFilters ? panelFilterParams(panel) : [];
-    return params.length ? `${base}${base.includes("?") ? "&" : "?"}${params.join("&")}` : base;
+    const url = params.length ? `${base}${base.includes("?") ? "&" : "?"}${params.join("&")}` : base;
+    const cut = url.indexOf("?");
+    const query = new URLSearchParams(cut < 0 ? "" : url.slice(cut + 1));
+    query.set("lang", gridLocale);
+    return `${cut < 0 ? url : url.slice(0, cut)}?${query}`;
   };
   const createToggle = (sub, panelCount = 1) => {
     const markupNode = () => {
@@ -1703,6 +1726,7 @@ function vGrid(config) {
         reorderColumns: panel.reorderColumns ?? reorderColumns,
         reorderDelay: panel.reorderDelay ?? reorderDelayMs,
         namespace: namePrefix,
+        locale: gridLocale || void 0,
         settings: false,
         actions: false,
         onReady: () => {
@@ -2595,6 +2619,7 @@ function vGrid(config) {
     }
     if (activeColumns.length !== columns.length) payload.columns = activeColumns.map((column) => column.name).join(",");
     Object.assign(payload, filter, extra);
+    payload.lang = gridLocale;
     const getUrl = () => {
       const p = new URLSearchParams({ page: payload.page });
       if (payload.limit) p.set("limit", payload.limit);
@@ -2603,6 +2628,7 @@ function vGrid(config) {
       if (payload.columns) p.set("columns", payload.columns);
       Object.entries(filter).forEach(([k, v]) => p.set(k, v));
       Object.entries(extra).forEach(([k, v]) => p.set(k, v));
+      p.set("lang", gridLocale);
       const cut = dataSource.indexOf("?");
       return cut < 0 ? `${dataSource}?${p}` : mergeQuery(`${dataSource.slice(0, cut)}?${p}`, dataSource.slice(cut + 1));
     };
