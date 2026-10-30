@@ -1183,10 +1183,15 @@ export function vGrid(config) {
                 const label = described ? value.label : value;
                 const text = (label instanceof Element ? label.textContent : htmlToText(label ?? '')).trim() || keys.join(' – ');
                 const symbol = described && value.symbol !== undefined && value.symbol !== null ? String(value.symbol) : '';
-                return { key, keys, label: label ?? text, text, symbol, face: symbol || [...text][0] };
+                const fixed = described && value.value !== undefined && value.value !== null ? String(value.value) : null;
+                if (fixed !== null && (isRange || fixed === '')) {
+                    console.error(`vGrid: filterModes key "${key}" on column "${col.name}" needs a non-empty value and cannot be a range.`);
+                    return null;
+                }
+                return { key, keys, label: label ?? text, text, symbol, face: symbol || [...text][0], value: fixed };
             }).filter(Boolean);
             if (!modes.some(mode => mode.key === col.name)) {
-                modes.unshift({ key: col.name, keys: [col.name], label: 'Contains', text: 'Contains', symbol: '≈', face: '≈' });
+                modes.unshift({ key: col.name, keys: [col.name], label: 'Contains', text: 'Contains', symbol: '≈', face: '≈', value: null });
             }
             if (modes.length < 2) modes = null;
         }
@@ -1199,10 +1204,11 @@ export function vGrid(config) {
 
     const filterSlotKey = input => `${activeColumns[parseInt(input.dataset.col)]?.name}\u0000${input.dataset.slot || '0'}`;
     const keptFilterValues = () => new Map(filterInputs
-        .filter(input => input.value && activeColumns[parseInt(input.dataset.col)])
+        .filter(input => input.value && !input.dataset.vgridFixed && activeColumns[parseInt(input.dataset.col)])
         .map(input => [filterSlotKey(input), input.value]));
     const restoreFilterValues = kept => {
         filterInputs.forEach(input => {
+            if (input.dataset.vgridFixed) return;
             const value = kept.get(filterSlotKey(input));
             if (value) input.value = value;
         });
@@ -1216,6 +1222,10 @@ export function vGrid(config) {
     });
 
     const clearFilterInput = control => {
+        if (control.dataset.vgridFilterFixed) {
+            selectFilterMode(control.dataset.vgridFilterFixed, control.dataset.vgridFilterFixed);
+            return;
+        }
         if (control.value === '') return;
         control.focus();
         if (control.tagName === 'SELECT') {
@@ -1317,6 +1327,30 @@ export function vGrid(config) {
             const input = makeTextFilter(col, i);
             input.dataset.param = key;
             input.dataset.slot = String(slot);
+            if (mode.value !== null) {
+                input.type = 'hidden';
+                input.value = mode.value;
+                input.dataset.vgridFixed = '1';
+                const shown = document.createElement('input');
+                shown.type = 'text';
+                shown.readOnly = true;
+                shown.value = mode.text;
+                shown.className = partClass('filter-fixed');
+                shown.dataset.vgridFilterFixed = col.name;
+                shown.setAttribute('aria-label', `${name} filter: ${mode.text}`);
+                shown.setAttribute('aria-haspopup', 'menu');
+                shown.style.width = '100%';
+                shown.style.boxSizing = 'border-box';
+                shown.style.paddingLeft = FILTER_MODE_WIDTH;
+                shown.style.cursor = 'pointer';
+                const field = clearable ? addFilterClear(shown, col) : shown;
+                field.style.flex = '1 1 0';
+                field.style.minWidth = '0';
+                box.append(input, field);
+                filterDefaults.set(input, '');
+                filterInputs.push(input);
+                return;
+            }
             if (mode.keys.length > 1) {
                 input.placeholder = slot ? 'to' : 'from';
                 input.setAttribute('aria-label', `${name} ${slot ? 'to' : 'from'}`);
@@ -1384,8 +1418,10 @@ export function vGrid(config) {
         else filterModeKeys.set(name, key);
         buildFilterRow();
         restoreFilterValues(kept);
-        filterInputs.find(input => activeColumns[parseInt(input.dataset.col)] === col)?.focus();
-        if (!filled) return;
+        (filterInputs.find(input => activeColumns[parseInt(input.dataset.col)] === col && !input.dataset.vgridFixed)
+            || [...filterRowElement.querySelectorAll('[data-vgrid-filter-fixed]')].find(field => field.dataset.vgridFilterFixed === name))?.focus();
+        const applied = filterInputs.some(input => input.dataset.vgridFixed && activeColumns[parseInt(input.dataset.col)] === col);
+        if (!filled && !applied) return;
         clearTimeout(filterTimer);
         currentPage = 1;
         render();
@@ -1471,8 +1507,21 @@ export function vGrid(config) {
         };
         filterRowElement.addEventListener('input', onFilterInput, { signal });
         filterRowElement.addEventListener('change', onFilterInput, { signal });
+        const fixedModeButtonOf = target => target.closest('[data-vgrid-filter-fixed]')?.closest('td')?.querySelector('[data-vgrid-filter-mode]') || null;
         filterRowElement.addEventListener('keydown', event => {
+            const fixedOwner = fixedModeButtonOf(event.target);
+            if (fixedOwner && ['Enter', ' ', 'ArrowDown'].includes(event.key)) {
+                event.preventDefault();
+                showFilterModeMenu(fixedOwner);
+                return;
+            }
             if (event.key !== 'Escape') return;
+            if (fixedOwner) {
+                if (!filterClears.some(entry => entry.control === event.target)) return;
+                event.preventDefault();
+                clearFilterInput(event.target);
+                return;
+            }
             const control = filterControlOf(event.target);
             if (!control || control.tagName === 'SELECT' || control.value === '') return;
             if (!filterClears.some(entry => entry.control === control)) return;
@@ -1480,7 +1529,7 @@ export function vGrid(config) {
             clearFilterInput(control);
         }, { signal });
         filterRowElement.addEventListener('click', event => {
-            const modeButton = event.target.closest('[data-vgrid-filter-mode]');
+            const modeButton = event.target.closest('[data-vgrid-filter-mode]') || fixedModeButtonOf(event.target);
             if (modeButton) {
                 const open = filterModeMenu.menu.matches(':popover-open');
                 if (filterModeMenu.menuOwner === modeButton && open) { filterModeMenu.menu.hidePopover(); return; }
