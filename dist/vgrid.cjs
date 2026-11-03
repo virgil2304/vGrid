@@ -1,4 +1,4 @@
-/* vGrid v1.0.567 */
+/* vGrid v1.0.568 */
 var __defProp = Object.defineProperty;
 var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;

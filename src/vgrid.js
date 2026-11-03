@@ -1,4 +1,4 @@
-/* vGrid v1.0.0.5.67 | Last updated: 2026-10-25 */
+/* vGrid v1.0.0.5.68 | Last updated: 2026-11-03 */
 export function vGrid(config) {
 
     const { el, caption, columns: columnsConfig = [], data = [], dataSource, method = 'GET', headers = {},
