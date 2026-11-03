@@ -338,6 +338,15 @@ export function vGrid(config) {
 
     const namePrefix = typeof namespace === 'string' && namespace ? namespace : (target.id || '');
     const partClass = (part, ...extra) => ['vgrid-' + part, namePrefix ? `${namePrefix}-${part}` : '', ...extra].filter(Boolean).join(' ');
+    const make = (tag, props = {}, ...children) => {
+        const { attrs, data, ...rest } = props;
+        const node = Object.assign(document.createElement(tag), rest);
+        if (attrs) Object.entries(attrs).forEach(([name, value]) => node.setAttribute(name, value));
+        if (data) Object.assign(node.dataset, data);
+        node.append(...children);
+        return node;
+    };
+    const makeButton = (props = {}, ...children) => make('button', { type: 'button', ...props }, ...children);
 
     const localeTag = value => {
         if (typeof value !== 'string' || !value.trim()) return '';
@@ -429,28 +438,14 @@ export function vGrid(config) {
     const buildExternalSortOptions = () => {
         if (!externalSortColumnElement) return;
         const selected = externalSortColumnElement.value;
-        const placeholder = document.createElement('option');
-        placeholder.value = '';
-        placeholder.textContent = 'Sort by…';
-        externalSortColumnElement.replaceChildren(placeholder, ...activeColumns
+        externalSortColumnElement.replaceChildren(make('option', { value: '', textContent: 'Sort by…' }), ...activeColumns
             .filter(c => c.sort !== false)
-            .map(c => {
-                const opt = document.createElement('option');
-                opt.value = c.name;
-                opt.textContent = c.label || c.name;
-                return opt;
-            }));
+            .map(c => make('option', { value: c.name, textContent: c.label || c.name })));
         externalSortColumnElement.value = selected || sortByPrimary?.column || '';
     };
     buildExternalSortOptions();
     if (externalSortDirectionElement?.tagName === 'SELECT' && !externalSortDirectionElement.options.length) {
-        const asc = document.createElement('option');
-        asc.value = 'asc';
-        asc.textContent = 'Ascending';
-        const desc = document.createElement('option');
-        desc.value = 'desc';
-        desc.textContent = 'Descending';
-        externalSortDirectionElement.replaceChildren(asc, desc);
+        externalSortDirectionElement.replaceChildren(make('option', { value: 'asc', textContent: 'Ascending' }), make('option', { value: 'desc', textContent: 'Descending' }));
     }
     if (externalSortDirectionElement && sortByPrimary?.order) externalSortDirectionElement.value = sortByPrimary.order;
 
@@ -467,17 +462,14 @@ export function vGrid(config) {
     const hasSortableColumns = columns.some(column => column.sort !== false);
     let sortInstructions = null;
     if (hasSortableColumns || cellSelectionActive) {
-        sortInstructions = document.createElement('span');
         let id = 'vgrid-sort-instructions';
         for (let suffix = 1; document.getElementById(id); suffix++) id = `vgrid-sort-instructions-${suffix}`;
-        sortInstructions.id = id;
-        sortInstructions.textContent = [
+        sortInstructions = make('span', { id, className: 'vgrid-visually-hidden', textContent: [
             hasSortableColumns ? 'Sortable column headings are buttons. Activate a heading to sort; the current direction is announced with the heading. Hold Shift while activating another heading to add a secondary sort; priority and direction are announced with each sorted heading.' : '',
             cellSelectionActive ? 'Use arrow keys to move between cells, hold Shift with an arrow key to extend the selected range, and press Ctrl or Command+C to copy selected cells as tab-separated text. Pasting is not supported.' : '',
             onRowClick ? 'Rows with row-click callbacks can be activated with Enter or Space.' : '',
             onRowDblClick ? 'Shift+Enter runs the row double-click callback; row action buttons remain separate controls.' : '',
-        ].filter(Boolean).join(' ');
-        sortInstructions.style.cssText = 'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;';
+        ].filter(Boolean).join(' ') });
         const describedBy = new Set((originalAriaDescribedBy || '').split(/\s+/).filter(Boolean));
         describedBy.add(id);
         element.setAttribute('aria-describedby', [...describedBy].join(' '));
@@ -486,9 +478,6 @@ export function vGrid(config) {
     element.classList.add('vgrid');
     element.border = '1';
     element.rules = 'all';
-    element.style.width = '100%';
-    element.style.maxWidth = '100%';
-    element.style.borderCollapse = 'collapse';
     element.style.tableLayout = 'auto';
 
     const utilityColumnCount = Number(rowReorderActive) + Number(hasRowActions);
@@ -541,11 +530,10 @@ export function vGrid(config) {
     const buildColgroup = () => {
         columnCols.length = 0;
         colgroup.replaceChildren(...Array.from({ length: totalCols }, (unused, index) => {
-            const col = document.createElement('col');
+            const col = make('col');
             if (isToggleCell(index)) col.className = partClass('toggle-column');
             else if (index < selectionOffset) col.className = partClass('select-column');
             else if (index === rowNumberIndex) col.className = partClass('row-number-column');
-            if (isFitCell(index)) col.style.width = '1px';
             columnCols.push(col);
             return col;
         }));
@@ -563,11 +551,14 @@ export function vGrid(config) {
         pruneColSpanCells();
         colSpanCells.forEach(cell => { cell.colSpan = totalCols; });
     };
+    const spanningRow = (part, ...children) => {
+        const td = make('td', { colSpan: totalCols }, ...children);
+        trackColSpan(td);
+        return make('tr', { className: partClass(part), attrs: { role: 'presentation' } }, td);
+    };
     buildColgroup();
     const clipCell = cell => {
-        cell.style.overflow = 'hidden';
-        cell.style.textOverflow = 'ellipsis';
-        cell.style.whiteSpace = 'nowrap';
+        cell.classList.add('vgrid-clip');
         return cell;
     };
 
@@ -585,8 +576,7 @@ export function vGrid(config) {
     let printButton = null;
 
     const makeActionButton = config => {
-        const button = document.createElement('button');
-        button.type = 'button';
+        const button = makeButton();
         if (config.title) button.title = config.title;
         if (config.className) button.className = config.className;
         if (config.html instanceof Element) button.replaceChildren(config.html.cloneNode(true));
@@ -620,94 +610,31 @@ export function vGrid(config) {
         settingsButton = makeActionButton(resolvedActions.settings);
         settingsButton.setAttribute('popovertarget', settingsPanel.id);
 
-        const settingsClose = document.createElement('button');
-        settingsClose.type = 'button';
-        settingsClose.className = partClass('settings-close');
-        settingsClose.textContent = '\u00D7';
-        settingsClose.title = 'Close';
-        settingsClose.setAttribute('aria-label', 'Close');
-        settingsClose.setAttribute('popovertarget', settingsPanel.id);
-        settingsClose.setAttribute('popovertargetaction', 'hide');
-        settingsPanel.appendChild(settingsClose);
+        settingsPanel.appendChild(makeButton({
+            className: partClass('settings-close'),
+            textContent: '\u00D7',
+            title: 'Close',
+            attrs: { 'aria-label': 'Close', popovertarget: settingsPanel.id, popovertargetaction: 'hide' },
+        }));
 
-        const settingsTitle = document.createElement('div');
-        settingsTitle.className = partClass('settings-title');
-        settingsTitle.id = `${settingsPanel.id}-title`;
-        settingsTitle.textContent = 'Display columns';
-        const settingsList = document.createElement('div');
-        settingsList.className = partClass('settings-list');
-        settingsList.setAttribute('role', 'group');
-        settingsList.setAttribute('aria-labelledby', settingsTitle.id);
+        const settingsTitle = make('div', { className: partClass('settings-title'), id: `${settingsPanel.id}-title`, textContent: 'Display columns' });
+        const settingsList = make('div', { className: partClass('settings-list'), attrs: { role: 'group', 'aria-labelledby': settingsTitle.id } });
         const settingsCheckboxes = [];
-        const makeSettingsControl = (label, text) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.textContent = text;
-            button.title = label;
-            button.setAttribute('aria-label', label);
-            return button;
-        };
         columns.forEach((col, index) => {
-            const row = document.createElement('div');
-            row.className = partClass('settings-column');
-            row.style.cssText = 'display:flex;align-items:center;gap:.25em;margin:.15em 0;';
-            const columnLabel = document.createElement('label');
-            columnLabel.style.cssText = 'display:flex;align-items:center;flex:1 1 auto;min-width:0;margin:0;';
-            const checkbox = document.createElement('input');
-            checkbox.type = 'checkbox';
-            checkbox.id = `${settingsPanel.id}-column-${index}`;
-            checkbox.checked = col.active !== false;
+            const checkbox = make('input', { type: 'checkbox', id: `${settingsPanel.id}-column-${index}`, checked: col.active !== false });
             checkbox.addEventListener('change', () => {
                 if (!checkbox.checked && !settingsCheckboxes.some(entry => entry.checkbox.checked)) {
                     checkbox.checked = true;
                 }
             }, { signal });
-            columnLabel.htmlFor = checkbox.id;
-            columnLabel.append(checkbox, document.createTextNode(` ${col.label || col.name}`));
-            const controls = document.createElement('span');
-            controls.style.cssText = 'display:flex;gap:.2em;flex:0 0 auto;';
-            const entry = { column: col, checkbox, row, controls, moveEarlier: null, moveLater: null, narrower: null, wider: null };
-            if (reorderColumns !== false) {
-                entry.moveEarlier = makeSettingsControl(`Move ${col.label || col.name} column earlier`, '\u2191');
-                entry.moveLater = makeSettingsControl(`Move ${col.label || col.name} column later`, '\u2193');
-                entry.moveEarlier.addEventListener('click', () => {
-                    const current = activeColumns.indexOf(col);
-                    if (current > 0 && moveColumn(current, current - 1)) {
-                        syncSettingsOrder();
-                        announceResultCount(`${col.label || col.name} column moved to position ${activeColumns.indexOf(col) + 1} of ${activeColumns.length}.`);
-                        entry.moveEarlier.focus();
-                    }
-                }, { signal });
-                entry.moveLater.addEventListener('click', () => {
-                    const current = activeColumns.indexOf(col);
-                    if (current !== -1 && current < activeColumns.length - 1 && moveColumn(current, current + 2)) {
-                        syncSettingsOrder();
-                        announceResultCount(`${col.label || col.name} column moved to position ${activeColumns.indexOf(col) + 1} of ${activeColumns.length}.`);
-                        entry.moveLater.focus();
-                    }
-                }, { signal });
-                controls.append(entry.moveEarlier, entry.moveLater);
-            }
-            entry.narrower = makeSettingsControl(`Decrease ${col.label || col.name} column width`, '\u2212');
-            entry.wider = makeSettingsControl(`Increase ${col.label || col.name} column width`, '+');
-            entry.narrower.addEventListener('click', () => resizeColumnBy(col, -10), { signal });
-            entry.wider.addEventListener('click', () => resizeColumnBy(col, 10), { signal });
-            controls.append(entry.narrower, entry.wider);
-            row.append(columnLabel, controls);
-            settingsCheckboxes.push(entry);
+            const row = make('div', { className: partClass('settings-column') }, make('label', { htmlFor: checkbox.id }, checkbox, ` ${col.label || col.name}`));
+            settingsCheckboxes.push({ column: col, checkbox, row });
             settingsList.appendChild(row);
         });
         settingsPanel.append(settingsTitle, settingsList);
         syncSettingsOrder = () => {
             settingsCheckboxes.sort((a, b) => columns.indexOf(a.column) - columns.indexOf(b.column));
             settingsList.append(...settingsCheckboxes.map(entry => entry.row));
-            settingsCheckboxes.forEach(entry => {
-                const index = activeColumns.indexOf(entry.column);
-                if (entry.moveEarlier) entry.moveEarlier.disabled = index <= 0;
-                if (entry.moveLater) entry.moveLater.disabled = index < 0 || index >= activeColumns.length - 1;
-                entry.narrower.disabled = index < 0 || activeColumns.length < 2;
-                entry.wider.disabled = index < 0 || activeColumns.length < 2;
-            });
         };
         syncSettingsOrder();
 
@@ -717,14 +644,10 @@ export function vGrid(config) {
             rebuildColumns();
         };
 
-        const applyButton = document.createElement('button');
-        applyButton.type = 'button';
-        applyButton.textContent = 'Apply';
+        const applyButton = makeButton({ textContent: 'Apply' });
         applyButton.addEventListener('click', applyPending, { signal });
 
-        const saveButton = document.createElement('button');
-        saveButton.type = 'button';
-        saveButton.textContent = 'Save';
+        const saveButton = makeButton({ textContent: 'Save' });
         saveButton.addEventListener('click', () => {
             applyPending();
             const preference = {};
@@ -732,10 +655,7 @@ export function vGrid(config) {
             try { localStorage.setItem(settingsStorageKey, JSON.stringify(preference)); } catch { }
         }, { signal });
 
-        const settingsActions = document.createElement('div');
-        settingsActions.className = partClass('settings-actions');
-        settingsActions.append(applyButton, saveButton);
-        settingsPanel.appendChild(settingsActions);
+        settingsPanel.appendChild(make('div', { className: partClass('settings-actions') }, applyButton, saveButton));
 
         let settingsAbove = false;
         const measureSettingsPanel = () => {
@@ -842,31 +762,16 @@ export function vGrid(config) {
     const captionActions = inlineActions && actionsPosition !== 'bottom';
     const bottomActions = inlineActions && actionsPosition === 'bottom';
 
-    const makeActions = () => {
-        const group = document.createElement('span');
-        group.className = partClass('actions');
-        group.style.float = 'right';
-        group.append(...actionButtons);
-        return group;
-    };
+    const makeActions = () => make('span', { className: partClass('actions') }, ...actionButtons);
 
     if (caption || captionActions) {
-        const tr = document.createElement('tr');
-        tr.className = partClass('caption');
-        tr.setAttribute('role', 'presentation');
-        const td = document.createElement('td');
-        td.colSpan = totalCols;
-        const inner = document.createElement('div');
-        inner.className = partClass('viewport');
+        const inner = make('div', { className: partClass('viewport') });
         if (caption) {
             inner.innerHTML = caption;
             accessibleCaptionText = inner.textContent.replace(/\s+/g, ' ').trim() || accessibleCaptionText;
         }
         if (captionActions) inner.insertBefore(makeActions(), inner.firstChild);
-        td.appendChild(inner);
-        tr.appendChild(td);
-        trackColSpan(td);
-        thead.appendChild(tr);
+        thead.appendChild(spanningRow('caption', inner));
     }
 
     if (accessibleCaptionText && !originalAriaLabel?.trim() && !originalAriaLabelledBy?.trim()) {
@@ -899,11 +804,9 @@ export function vGrid(config) {
     };
 
     externalPaginationElements.forEach(container => {
-        const info = document.createElement('span');
-        info.className = partClass('count');
-        const pager = bindPager(document.createElement('span'));
-        pager.className = partClass('pager');
-        container.replaceChildren(info, document.createTextNode(' '), pager);
+        const info = make('span', { className: partClass('count') });
+        const pager = bindPager(make('span', { className: partClass('pager') }));
+        container.replaceChildren(info, ' ', pager);
         infoEls.push(info);
         pagerEls.push(pager);
     });
@@ -925,10 +828,7 @@ export function vGrid(config) {
         const value = String(size);
         if (!select.options) { select.value = value; return; }
         if (![...select.options].some(option => option.value === value)) {
-            const opt = document.createElement('option');
-            opt.value = value;
-            opt.textContent = size;
-            select.insertBefore(opt, [...select.options].find(option => parseInt(option.value) > size) || null);
+            select.insertBefore(make('option', { value, textContent: size }), [...select.options].find(option => parseInt(option.value) > size) || null);
         }
         select.value = value;
     };
@@ -943,29 +843,16 @@ export function vGrid(config) {
         const selected = currentPageSize() || rowsPerPage;
         const sizes = [...new Set([...pageSizeOptions(total), selected])].filter(size => Number.isFinite(size)).sort((a, b) => a - b);
         rowsPerPageSelects.forEach(select => {
-            select.replaceChildren(...sizes.map(s => {
-                const opt = document.createElement('option');
-                opt.value = String(s);
-                opt.textContent = s;
-                return opt;
-            }));
+            select.replaceChildren(...sizes.map(s => make('option', { value: String(s), textContent: s })));
             select.value = String(selected);
         });
         externalRowsPerPageElements.forEach(select => setSelectValue(select, selected));
     };
 
     const makeBar = () => {
-        const tr = document.createElement('tr');
-        tr.className = partClass('pagination');
-        tr.setAttribute('role', 'presentation');
-        const td = document.createElement('td');
-        td.colSpan = totalCols;
-        const left = document.createElement('span');
-        left.className = partClass('count');
-        const center = bindPager(document.createElement('span'));
-        center.className = partClass('pager');
-        const right = document.createElement('span');
-        right.className = partClass('rows-per-page');
+        const left = make('span', { className: partClass('count') });
+        const center = bindPager(make('span', { className: partClass('pager') }));
+        const right = make('span', { className: partClass('rows-per-page') });
 
         if (showPagination) {
             infoEls.push(left);
@@ -973,34 +860,16 @@ export function vGrid(config) {
         }
 
         if (showRowsPerPage) {
-            const label = document.createElement('label');
-            label.textContent = 'Show ';
-            const rowsPerPageSelect = document.createElement('select');
-            const sizes = pageSizeOptions(isRemote ? 0 : data.length);
-            sizes.forEach(s => {
-                const opt = document.createElement('option');
-                opt.value = String(s);
-                opt.textContent = s;
-                if (s === rowsPerPage) opt.selected = true;
-                rowsPerPageSelect.appendChild(opt);
-            });
+            const rowsPerPageSelect = make('select', {}, ...pageSizeOptions(isRemote ? 0 : data.length)
+                .map(s => make('option', { value: String(s), textContent: s, selected: s === rowsPerPage })));
             rowsPerPageSelects.push(rowsPerPageSelect);
-            const after = document.createElement('span');
-            after.textContent = ' rows';
-            label.appendChild(rowsPerPageSelect);
-            label.appendChild(after);
-            right.appendChild(label);
+            right.appendChild(make('label', { textContent: 'Show ' }, rowsPerPageSelect, make('span', { textContent: ' rows' })));
         }
 
-        const bar = document.createElement('span');
-        bar.className = partClass('pagination-bar');
-        bar.append(left, center, right);
-        td.appendChild(bar);
+        const bar = make('span', { className: partClass('pagination-bar') }, left, center, right);
         paginationBars.push({ bar, pager: center, paged: showPagination, width: 0, frame: 0 });
         barObserver.observe(bar);
-        tr.appendChild(td);
-        trackColSpan(td);
-        return tr;
+        return spanningRow('pagination', bar);
     };
 
     if (rowsPerPage && (showPagination || showRowsPerPage)) thead.appendChild(makeBar());
@@ -1022,72 +891,38 @@ export function vGrid(config) {
         const cells = [];
         if (cellSelectionActive) headerRow.setAttribute('role', 'row');
         if (rowSelectionActive) {
-            const th = document.createElement('th');
-            th.scope = 'col';
-            th.className = partClass('select');
+            const th = make('th', { scope: 'col', className: partClass('select') });
             selectAllBox = null;
             if (singleSelection) th.setAttribute('aria-label', 'Selection');
             else {
-                selectAllBox = document.createElement('input');
-                selectAllBox.type = 'checkbox';
-                selectAllBox.dataset.vgridSelectPage = '1';
+                selectAllBox = make('input', { type: 'checkbox', data: { vgridSelectPage: '1' } });
                 th.appendChild(selectAllBox);
             }
             cells.push(clipCell(th));
         }
         if (rowNumbers) {
-            const th = document.createElement('th');
-            th.scope = 'col';
-            th.className = partClass('row-number');
+            const th = make('th', { scope: 'col', className: partClass('row-number') });
             if (cellSelectionActive) th.setAttribute('role', 'columnheader');
             cells.push(clipCell(th));
         }
         activeColumns.forEach((col, i) => {
-            const th = document.createElement('th');
             const label = col.label || col.name;
-            th.textContent = label;
-            th.scope = 'col';
+            const th = make('th', { scope: 'col', textContent: label });
             if (cellSelectionActive) th.setAttribute('role', 'columnheader');
             if (col.width) th.width = String(col.width);
             if (col.sort !== false) {
                 th.title = `Sort by ${label}`;
                 th.dataset.vgridSort = String(i);
-                const button = document.createElement('button');
-                button.type = 'button';
-                button.style.cssText = 'display:block;width:100%;box-sizing:border-box;padding:0;border:0;background:none;color:inherit;font:inherit;text-align:inherit;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;';
-                button.appendChild(document.createTextNode(label));
-                button.setAttribute('aria-label', `Sort by ${label}`);
-                const indicator = document.createElement('span');
-                indicator.dataset.vgridSortIndicator = '1';
-                indicator.setAttribute('aria-hidden', 'true');
-                button.appendChild(indicator);
-                th.replaceChildren(button);
+                th.replaceChildren(makeButton({ attrs: { 'aria-label': `Sort by ${label}` } }, label,
+                    make('span', { data: { vgridSortIndicator: '1' }, attrs: { 'aria-hidden': 'true' } })));
             }
             cells.push(clipCell(th));
             columnHeaders.push(th);
             columnHeaderLabels.push(label);
         });
-        if (rowReorderActive) {
-            const th = document.createElement('th');
-            th.scope = 'col';
-            th.textContent = 'Row order';
-            th.setAttribute('aria-label', 'Row order controls');
-            cells.push(clipCell(th));
-        }
-        if (hasRowActions) {
-            const th = document.createElement('th');
-            th.scope = 'col';
-            th.textContent = 'Actions';
-            th.setAttribute('aria-label', 'Row actions');
-            cells.push(clipCell(th));
-        }
-        if (hasPanels) {
-            placeToggleCells(cells, () => {
-                const th = document.createElement('th');
-                th.scope = 'col';
-                return clipCell(th);
-            });
-        }
+        if (rowReorderActive) cells.push(clipCell(make('th', { scope: 'col', textContent: 'Row order', attrs: { 'aria-label': 'Row order controls' } })));
+        if (hasRowActions) cells.push(clipCell(make('th', { scope: 'col', textContent: 'Actions', attrs: { 'aria-label': 'Row actions' } })));
+        if (hasPanels) placeToggleCells(cells, () => clipCell(make('th', { scope: 'col' })));
         headerCells.push(...cells);
         headerRow.replaceChildren(...cells);
         syncSelection();
@@ -1138,11 +973,7 @@ export function vGrid(config) {
 
     const filterModeKeys = new Map();
     const filterModeCache = new WeakMap();
-    const filterModeMenu = { menu: document.createElement('div'), menuOwner: null, menuAbove: false, menuFrame: 0, menuClosedAt: 0, column: null };
-    filterModeMenu.menu.setAttribute('popover', '');
-    filterModeMenu.menu.setAttribute('role', 'menu');
-    filterModeMenu.menu.className = partClass('filter-mode-menu');
-    const FILTER_MODE_WIDTH = '24px';
+    const filterModeMenu = { menu: make('div', { className: partClass('filter-mode-menu'), attrs: { popover: '', role: 'menu' } }), menuOwner: null, menuAbove: false, menuFrame: 0, menuClosedAt: 0, column: null };
 
     const htmlToText = html => {
         const template = document.createElement('template');
@@ -1267,62 +1098,35 @@ export function vGrid(config) {
 
     const addFilterClear = (control, col) => {
         const isSelect = control.tagName === 'SELECT';
-        const wrap = document.createElement('span');
-        wrap.style.position = 'relative';
-        wrap.style.display = 'block';
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = partClass('filter-clear');
-        button.hidden = true;
-        button.textContent = '\u00D7';
-        button.setAttribute('aria-label', `Clear ${col.label || col.name} filter`);
-        button.style.position = 'absolute';
-        button.style.top = '0';
-        button.style.bottom = '0';
-        button.style.right = isSelect ? '1.2em' : '0';
-        button.style.width = '24px';
-        button.style.padding = '0';
-        button.style.border = '0';
-        button.style.background = 'none';
-        button.style.font = 'inherit';
-        button.style.lineHeight = '1';
-        button.style.color = 'inherit';
-        button.style.opacity = '.6';
-        button.style.cursor = 'pointer';
-        button.dataset.vgridFilterClear = '1';
-        wrap.append(control, button);
+        const button = makeButton({
+            className: partClass('filter-clear'),
+            hidden: true,
+            textContent: '\u00D7',
+            attrs: { 'aria-label': `Clear ${col.label || col.name} filter` },
+            data: { vgridFilterClear: '1' },
+        });
         filterClears.push({ control, button, pad: isSelect ? 'calc(24px + 1.2em)' : '24px' });
-        return wrap;
+        return make('span', { className: partClass('filter-wrap') }, control, button);
     };
 
-    const makeTextFilter = (col, i) => {
-        const input = document.createElement('input');
-        input.className = partClass(`filter-${col.name}`);
-        input.type = 'text';
-        input.placeholder = col.label || col.name;
-        input.setAttribute('aria-label', `Filter by ${col.label || col.name}`);
-        input.dataset.col = String(i);
-        return input;
-    };
+    const makeTextFilter = (col, i) => make('input', {
+        type: 'text',
+        className: partClass(`filter-${col.name}`),
+        placeholder: col.label || col.name,
+        attrs: { 'aria-label': `Filter by ${col.label || col.name}` },
+        data: { col: String(i) },
+    });
 
     const buildModedFilter = (col, i, modes, clearable) => {
         const mode = currentFilterMode(col, modes);
         const name = col.label || col.name;
-        const box = document.createElement('span');
-        box.className = partClass('filter-moded');
-        box.style.position = 'relative';
-        box.style.display = 'flex';
-        box.style.gap = '.2em';
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = partClass('filter-mode', partClass(`filter-mode-${col.name}`));
-        button.textContent = mode.face;
-        button.title = `${name}: ${mode.text}`;
-        button.setAttribute('aria-haspopup', 'menu');
-        button.setAttribute('aria-label', `${name} filter: ${mode.text}`);
-        button.dataset.vgridFilterMode = String(i);
-        button.style.cssText = `position:absolute;top:0;bottom:0;left:0;z-index:1;width:${FILTER_MODE_WIDTH};padding:0;border:0;background:none;font:inherit;line-height:1;color:inherit;cursor:pointer;overflow:hidden;`;
-        box.appendChild(button);
+        const box = make('span', { className: partClass('filter-moded') }, makeButton({
+            className: partClass('filter-mode', partClass(`filter-mode-${col.name}`)),
+            textContent: mode.face,
+            title: `${name}: ${mode.text}`,
+            attrs: { 'aria-haspopup': 'menu', 'aria-label': `${name} filter: ${mode.text}` },
+            data: { vgridFilterMode: String(i) },
+        }));
         mode.keys.forEach((key, slot) => {
             const input = makeTextFilter(col, i);
             input.dataset.param = key;
@@ -1331,37 +1135,22 @@ export function vGrid(config) {
                 input.type = 'hidden';
                 input.value = mode.value;
                 input.dataset.vgridFixed = '1';
-                const shown = document.createElement('input');
-                shown.type = 'text';
-                shown.readOnly = true;
-                shown.value = mode.text;
-                shown.className = partClass('filter-fixed');
-                shown.dataset.vgridFilterFixed = col.name;
-                shown.setAttribute('aria-label', `${name} filter: ${mode.text}`);
-                shown.setAttribute('aria-haspopup', 'menu');
-                shown.style.width = '100%';
-                shown.style.boxSizing = 'border-box';
-                shown.style.paddingLeft = FILTER_MODE_WIDTH;
-                shown.style.cursor = 'pointer';
-                const field = clearable ? addFilterClear(shown, col) : shown;
-                field.style.flex = '1 1 0';
-                field.style.minWidth = '0';
-                box.append(input, field);
-                filterDefaults.set(input, '');
-                filterInputs.push(input);
-                return;
+                const shown = make('input', {
+                    type: 'text',
+                    readOnly: true,
+                    value: mode.text,
+                    className: partClass('filter-fixed'),
+                    attrs: { 'aria-label': `${name} filter: ${mode.text}`, 'aria-haspopup': 'menu' },
+                    data: { vgridFilterFixed: col.name },
+                });
+                box.append(input, clearable ? addFilterClear(shown, col) : shown);
+            } else {
+                if (mode.keys.length > 1) {
+                    input.placeholder = slot ? 'to' : 'from';
+                    input.setAttribute('aria-label', `${name} ${slot ? 'to' : 'from'}`);
+                }
+                box.appendChild(clearable ? addFilterClear(input, col) : input);
             }
-            if (mode.keys.length > 1) {
-                input.placeholder = slot ? 'to' : 'from';
-                input.setAttribute('aria-label', `${name} ${slot ? 'to' : 'from'}`);
-            }
-            input.style.width = '100%';
-            input.style.boxSizing = 'border-box';
-            if (!slot) input.style.paddingLeft = FILTER_MODE_WIDTH;
-            const field = clearable ? addFilterClear(input, col) : input;
-            field.style.flex = '1 1 0';
-            field.style.minWidth = '0';
-            box.appendChild(field);
             filterDefaults.set(input, '');
             filterInputs.push(input);
         });
@@ -1375,22 +1164,14 @@ export function vGrid(config) {
         const current = currentFilterMode(col, modes);
         const menu = filterModeMenu.menu;
         menu.replaceChildren(...modes.map(mode => {
-            const item = document.createElement('button');
-            item.type = 'button';
-            item.className = partClass('filter-mode-item');
-            item.setAttribute('role', 'menuitemradio');
-            item.setAttribute('aria-checked', mode === current ? 'true' : 'false');
-            item.title = mode.text;
-            item.dataset.vgridFilterModeKey = mode.key;
-            if (mode.symbol) {
-                const symbol = document.createElement('span');
-                symbol.className = partClass('filter-mode-symbol');
-                symbol.style.display = 'inline-block';
-                symbol.style.minWidth = '1.5em';
-                symbol.textContent = mode.symbol;
-                item.appendChild(symbol);
-            }
-            const label = document.createElement('span');
+            const item = makeButton({
+                className: partClass('filter-mode-item'),
+                title: mode.text,
+                attrs: { role: 'menuitemradio', 'aria-checked': mode === current ? 'true' : 'false' },
+                data: { vgridFilterModeKey: mode.key },
+            });
+            if (mode.symbol) item.appendChild(make('span', { className: partClass('filter-mode-symbol'), textContent: mode.symbol }));
+            const label = make('span');
             if (mode.label instanceof Element) label.appendChild(mode.label.cloneNode(true));
             else label.innerHTML = String(mode.label);
             item.appendChild(label);
@@ -1434,18 +1215,10 @@ export function vGrid(config) {
         filterClears.length = 0;
         filterDefaults.clear();
         const cells = [];
-        if (rowSelectionActive) {
-            const td = document.createElement('td');
-            td.className = partClass('select');
-            cells.push(clipCell(td));
-        }
-        if (rowNumbers) {
-            const td = document.createElement('td');
-            td.className = partClass('row-number');
-            cells.push(clipCell(td));
-        }
+        if (rowSelectionActive) cells.push(clipCell(make('td', { className: partClass('select') })));
+        if (rowNumbers) cells.push(clipCell(make('td', { className: partClass('row-number') })));
         activeColumns.forEach((col, i) => {
-            const td = document.createElement('td');
+            const td = make('td');
             if (col.filter !== false) {
                 const modes = filterModesOf(col);
                 if (modes) {
@@ -1456,32 +1229,26 @@ export function vGrid(config) {
                 let control;
                 let clearable = filterClear && col.filterClear !== false;
                 if (col.filterType === 'select') {
-                    const select = document.createElement('select');
-                    select.className = partClass(`filter-${col.name}`);
-                    select.setAttribute('aria-label', `Filter by ${col.label || col.name}`);
-                    select.dataset.col = String(i);
-                    (col.filterOptions || '').split(';').forEach(pair => {
+                    const select = make('select', {
+                        className: partClass(`filter-${col.name}`),
+                        attrs: { 'aria-label': `Filter by ${col.label || col.name}` },
+                        data: { col: String(i) },
+                    }, ...(col.filterOptions || '').split(';').map(pair => {
                         const sep = pair.indexOf(':');
-                        const val  = sep === -1 ? pair : pair.slice(0, sep);
-                        const text = sep === -1 ? pair : pair.slice(sep + 1);
-                        const o = document.createElement('option');
-                        o.value = val; o.textContent = text;
-                        select.appendChild(o);
-                    });
+                        return make('option', { value: sep === -1 ? pair : pair.slice(0, sep), textContent: sep === -1 ? pair : pair.slice(sep + 1) });
+                    }));
                     clearable = clearable && [...select.options].some(option => option.value === '');
                     control = select;
                 } else {
                     control = makeTextFilter(col, i);
                 }
-                control.style.width = '100%';
-                control.style.boxSizing = 'border-box';
                 td.appendChild(clearable ? addFilterClear(control, col) : control);
                 filterDefaults.set(control, control.value);
                 filterInputs.push(control);
             }
             cells.push(clipCell(td));
         });
-        if (hasPanels) placeToggleCells(cells, () => clipCell(document.createElement('td')));
+        if (hasPanels) placeToggleCells(cells, () => clipCell(make('td')));
         filterRowElement.replaceChildren(...cells);
         syncFilterClears();
     };
@@ -1541,14 +1308,6 @@ export function vGrid(config) {
             const control = button && filterClears.find(entry => entry.button === button)?.control;
             if (control) clearFilterInput(control);
         }, { signal });
-        filterRowElement.addEventListener('mouseover', event => {
-            const button = event.target.closest('[data-vgrid-filter-clear]');
-            if (button) button.style.opacity = '1';
-        }, { signal });
-        filterRowElement.addEventListener('mouseout', event => {
-            const button = event.target.closest('[data-vgrid-filter-clear]');
-            if (button) button.style.opacity = '.6';
-        }, { signal });
 
         const MAGNIFY_EM = 12;
         const MAGNIFY_INSET = 4;
@@ -1559,7 +1318,7 @@ export function vGrid(config) {
             if (entry.onEnd) entry.field.removeEventListener('transitionend', entry.onEnd);
             MAGNIFY_STYLES.forEach(name => { entry.field.style[name] = entry.saved[name]; });
             delete entry.field.dataset.vgridMagnified;
-            entry.cell.style.overflow = 'hidden';
+            entry.cell.style.overflow = '';
             magnifiedFields.delete(entry.field);
         };
         const expandField = entry => {
@@ -1752,45 +1511,22 @@ export function vGrid(config) {
             if (!node) return null;
             node.setAttribute('role', 'button');
             node.tabIndex = 0;
-            node.style.cursor = 'pointer';
             return node;
         };
         const toggleClasses = partClass('toggle-subgrid', partClass(`toggle-subgrid-${sub.order + 1}`)).split(' ');
         const opensMenu = panelCount > 1;
-        const node = markupNode();
-        if (node) {
-            node.classList.add(...toggleClasses);
-            node.dataset.vgridToggle = String(sub.order);
-            if (opensMenu) {
-                node.dataset.vgridMenu = '1';
-                node.setAttribute('aria-haspopup', 'menu');
-            }
-            return node;
-        }
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = toggleClasses.join(' ');
-        button.dataset.vgridToggle = String(sub.order);
+        const toggle = markupNode() || makeButton({ textContent: opensMenu ? SUBGRID_MENU : SUBGRID_CLOSED });
+        toggle.classList.add(...toggleClasses);
+        toggle.dataset.vgridToggle = String(sub.order);
         if (opensMenu) {
-            button.dataset.vgridMenu = '1';
-            button.setAttribute('aria-haspopup', 'menu');
+            toggle.dataset.vgridMenu = '1';
+            toggle.setAttribute('aria-haspopup', 'menu');
         }
-        button.textContent = opensMenu ? SUBGRID_MENU : SUBGRID_CLOSED;
-        return button;
+        return toggle;
     };
 
-    const panelNotice = (kind, text) => {
-        const box = document.createElement('div');
-        box.className = partClass(`panel-${kind}`);
-        if (kind === 'loading') {
-            const spinner = document.createElement('span');
-            spinner.className = 'vgrid-spinner';
-            spinner.setAttribute('aria-hidden', 'true');
-            box.appendChild(spinner);
-        }
-        box.appendChild(document.createTextNode(text));
-        return box;
-    };
+    const panelNotice = (kind, text) => make('div', { className: partClass(`panel-${kind}`) },
+        ...(kind === 'loading' ? [make('span', { className: 'vgrid-spinner', attrs: { 'aria-hidden': 'true' } })] : []), text);
 
     const failureReason = error => {
         const message = String(error?.message || '').trim();
@@ -1827,14 +1563,10 @@ export function vGrid(config) {
             syncPanelHeight(entry);
         };
         const caption = panelCaption(panel);
-        const content = document.createElement('div');
-        const captionEl = document.createElement('div');
-        captionEl.className = partClass('subgrid-caption');
-        const captionText = document.createElement('span');
-        captionText.className = partClass('subgrid-title');
+        const content = make('div');
+        const captionText = make('span', { className: partClass('subgrid-title') });
         if (caption) captionText.innerHTML = caption;
-        captionEl.append(captionText, entry.close);
-        body.replaceChildren(captionEl, content);
+        body.replaceChildren(make('div', { className: partClass('subgrid-caption') }, captionText, entry.close), content);
         const value = panelValue(panel, row);
         if (value === '') {
             content.textContent = `No "${panel.id}" value on this row.`;
@@ -1842,9 +1574,8 @@ export function vGrid(config) {
             return;
         }
         if (panel.type === 'grid') {
-            const host = document.createElement('div');
+            const host = make('div', { hidden: true });
             const loading = panelNotice('loading', 'Loading\u2026');
-            host.hidden = true;
             content.replaceChildren(loading, host);
             entry.instance = vGrid({
                 el: host,
@@ -1892,10 +1623,7 @@ export function vGrid(config) {
                 } else if (panel.type === 'html') {
                     content.innerHTML = text;
                 } else {
-                    const pre = document.createElement('pre');
-                    pre.className = partClass('panel-text');
-                    pre.textContent = text;
-                    content.replaceChildren(pre);
+                    content.replaceChildren(make('pre', { className: partClass('panel-text'), textContent: text }));
                 }
                 ready();
             })
@@ -1975,33 +1703,15 @@ export function vGrid(config) {
     };
 
     const openPanel = (sub, tr, row, toggle, panel) => {
-        const panelRow = document.createElement('tr');
-        panelRow.dataset.vgridSubgrid = '1';
-        const cell = document.createElement('td');
-        cell.colSpan = totalCols;
-        cell.className = partClass('subgrid-cell');
-        const slide = document.createElement('div');
-        slide.className = partClass('subgrid-slide');
+        const body = make('div', { className: partClass('subgrid-body') });
+        const clip = make('div', { className: partClass('subgrid-clip') }, body);
+        const slide = make('div', { className: partClass('subgrid-slide') }, clip);
         slide.style.height = '0px';
-        slide.style.overflow = 'hidden';
-        const clip = document.createElement('div');
-        clip.className = partClass('subgrid-clip');
-        const body = document.createElement('div');
-        body.className = partClass('subgrid-body');
-        const close = document.createElement('button');
-        close.type = 'button';
-        close.className = partClass('subgrid-close');
-        close.textContent = '\u00D7';
-        close.title = 'Close';
-        close.setAttribute('aria-label', 'Close');
-        close.dataset.vgridClose = '1';
+        const close = makeButton({ className: partClass('subgrid-close'), textContent: '\u00D7', title: 'Close', attrs: { 'aria-label': 'Close' }, data: { vgridClose: '1' } });
+        const panelRow = make('tr', { data: { vgridSubgrid: '1' } }, make('td', { colSpan: totalCols, className: partClass('subgrid-cell') }, slide));
         const entry = { panelRow, toggle, body, slide, clip, close, state: 'opening', ready: false, observer: null, frame: 0, instance: null, fetchAbort: null, panel: null };
         sub.entries.set(tr, entry);
         panelOwners.set(panelRow, { sub, tr });
-        clip.appendChild(body);
-        slide.appendChild(clip);
-        cell.appendChild(slide);
-        panelRow.appendChild(cell);
         const attached = panelRowsOf(tr);
         (attached[attached.length - 1] || tr).after(panelRow);
         updateTableRowMetadata();
@@ -2038,13 +1748,8 @@ export function vGrid(config) {
     };
 
     const panelMenuItem = (text, current, selectable = true) => {
-        const item = document.createElement('button');
-        item.type = 'button';
-        item.className = partClass('panel-menu-item');
-        item.setAttribute('role', selectable ? 'menuitemradio' : 'menuitem');
+        const item = makeButton({ className: partClass('panel-menu-item'), textContent: text, title: text, attrs: { role: selectable ? 'menuitemradio' : 'menuitem' } });
         if (selectable) item.setAttribute('aria-checked', current ? 'true' : 'false');
-        item.textContent = text;
-        item.title = text;
         return item;
     };
 
@@ -2177,34 +1882,32 @@ export function vGrid(config) {
         return tr && tr.parentNode === tbody ? tr : null;
     };
 
-    if (hasPanels) {
-        tbody.addEventListener('click', event => {
-            const close = event.target.closest('[data-vgrid-close]');
-            if (close) {
-                const owner = panelOwners.get(rowOf(close));
-                if (owner) closePanel(owner.sub, owner.tr);
-                return;
-            }
-            const toggle = event.target.closest('[data-vgrid-toggle]');
-            const tr = toggle && rowOf(toggle);
-            if (!tr) return;
-            const sub = subgrids[parseInt(toggle.dataset.vgridToggle)];
-            const row = rowData.get(tr);
-            if (!sub || !row) return;
-            if (sub.menuOwner === toggle && sub.menu.matches(':popover-open')) { hidePanelMenus(); return; }
-            if (sub.menuOwner === toggle && Date.now() - sub.menuClosedAt < 200) return;
-            const available = availablePanels(sub, row);
-            if (available.length === 1) { selectPanel(sub, tr, row, toggle, available[0]); return; }
-            showPanelMenu(sub, tr, row, toggle);
-        }, { signal });
-        tbody.addEventListener('keydown', event => {
-            if (event.key !== 'Enter' && event.key !== ' ') return;
-            const toggle = event.target.closest('[data-vgrid-toggle]');
-            if (!toggle || toggle.tagName === 'BUTTON' || !rowOf(toggle)) return;
-            event.preventDefault();
-            toggle.click();
-        }, { signal });
-    }
+    const onPanelClick = target => {
+        const close = target.closest('[data-vgrid-close]');
+        if (close) {
+            const owner = panelOwners.get(rowOf(close));
+            if (owner) closePanel(owner.sub, owner.tr);
+            return;
+        }
+        const toggle = target.closest('[data-vgrid-toggle]');
+        const tr = toggle && rowOf(toggle);
+        if (!tr) return;
+        const sub = subgrids[parseInt(toggle.dataset.vgridToggle)];
+        const row = rowData.get(tr);
+        if (!sub || !row) return;
+        if (sub.menuOwner === toggle && sub.menu.matches(':popover-open')) { hidePanelMenus(); return; }
+        if (sub.menuOwner === toggle && Date.now() - sub.menuClosedAt < 200) return;
+        const available = availablePanels(sub, row);
+        if (available.length === 1) { selectPanel(sub, tr, row, toggle, available[0]); return; }
+        showPanelMenu(sub, tr, row, toggle);
+    };
+
+    const rowTargetOf = target => {
+        if (target.closest('button, a, input, select, textarea, [data-vgrid-toggle]')) return null;
+        const tr = target.closest('tr.vgrid-row');
+        const row = tr && rowData.get(tr);
+        return row ? { tr, row } : null;
+    };
 
     const htmlText = document.createElement('template');
     const cellText = (row, col, rendered = false) => {
@@ -2231,18 +1934,9 @@ export function vGrid(config) {
         : String(row[rowNumbersType] ?? '');
 
     const emptyRow = () => {
-        const tr = document.createElement('tr');
-        tr.dataset.vgridEmpty = '1';
-        tr.className = partClass('empty');
-        const td = document.createElement('td');
-        td.colSpan = totalCols;
-        const text = document.createElement('span');
-        text.className = partClass('viewport');
-        text.textContent = 'No records to show.';
-        td.appendChild(text);
-        tr.appendChild(td);
+        const td = make('td', { colSpan: totalCols }, make('span', { className: partClass('viewport'), textContent: 'No records to show.' }));
         trackColSpan(td);
-        return tr;
+        return make('tr', { className: partClass('empty'), data: { vgridEmpty: '1' } }, td);
     };
 
     const buildRows = (rows, offset = 0) => {
@@ -2263,13 +1957,12 @@ export function vGrid(config) {
         renderFailures.clear();
         let rowClassFailed = false;
         rows.forEach((row, index) => {
-            const tr = document.createElement('tr');
+            const tr = make('tr', { className: partClass('row', row.id !== undefined && namePrefix ? `${namePrefix}-row-${row.id}` : '') });
             if (cellSelectionActive) tr.setAttribute('role', 'row');
             if ((onRowClick || onRowDblClick) && !cellSelectionActive) {
                 tr.tabIndex = 0;
                 tr.dataset.vgridClickable = '1';
             }
-            tr.className = partClass('row', row.id !== undefined && namePrefix ? `${namePrefix}-row-${row.id}` : '');
             if (rowClassOf) {
                 try {
                     const extra = rowClassOf(row);
@@ -2283,27 +1976,16 @@ export function vGrid(config) {
             rowData.set(tr, row);
             const cells = [];
             if (rowSelectionActive) {
-                const td = document.createElement('td');
-                td.className = partClass('select');
-                const box = document.createElement('input');
-                box.type = 'checkbox';
-                box.dataset.vgridSelectRow = '1';
-                box.setAttribute('aria-label', `Select ${rowActionDescription(row)} row`);
+                const box = make('input', { type: 'checkbox', data: { vgridSelectRow: '1' }, attrs: { 'aria-label': `Select ${rowActionDescription(row)} row` } });
                 if (selectionKeyOf(row) === null) {
                     box.disabled = true;
                     reportMissingSelectionKey();
                 } else box.checked = isRowSelected(row);
-                td.appendChild(box);
-                cells.push(clipCell(td));
+                cells.push(clipCell(make('td', { className: partClass('select') }, box)));
             }
-            if (rowNumbers) {
-                const td = document.createElement('td');
-                td.className = partClass('row-number');
-                td.textContent = rowNumberText(row, index, offset);
-                cells.push(clipCell(td));
-            }
+            if (rowNumbers) cells.push(clipCell(make('td', { className: partClass('row-number'), textContent: rowNumberText(row, index, offset) })));
             activeColumns.forEach(col => {
-                const td = document.createElement('td');
+                const td = make('td');
                 const value = row[col.name] ?? '';
                 const rendered = renderResult(row, col, value);
                 const href = row[hrefFieldOf(col)];
@@ -2311,10 +1993,7 @@ export function vGrid(config) {
                     if (typeof rendered === 'string') td.textContent = rendered;
                     else td.appendChild(rendered);
                 } else if (col.type === 'link' && isSafeHref(href)) {
-                    const a = document.createElement('a');
-                    a.href = href;
-                    a.textContent = value;
-                    td.appendChild(a);
+                    td.appendChild(make('a', { href, textContent: value }));
                 } else if (col.type === 'html') {
                     td.innerHTML = value;
                 } else if (col.type === 'enum') {
@@ -2333,43 +2012,39 @@ export function vGrid(config) {
                 cells.push(clipCell(td));
             });
             if (rowReorderActive) {
-                const td = document.createElement('td');
-                td.className = partClass('row-reorder');
-                const up = document.createElement('button');
-                up.type = 'button';
-                up.textContent = '\u2191';
-                up.title = 'Move row earlier';
-                up.setAttribute('aria-label', `Move ${rowActionDescription(row)} row earlier`);
-                up.dataset.vgridRowReorder = 'up';
-                const down = document.createElement('button');
-                down.type = 'button';
-                down.textContent = '\u2193';
-                down.title = 'Move row later';
-                down.setAttribute('aria-label', `Move ${rowActionDescription(row)} row later`);
-                down.dataset.vgridRowReorder = 'down';
                 const dataIndex = !isRemote ? localData.indexOf(row) : offset + index;
                 const canMove = !isRemote ? canReorderRows() : typeof onRowReorder === 'function';
-                up.disabled = !canMove || dataIndex <= 0;
-                down.disabled = !canMove || dataIndex < 0 || (isRemote
-                    ? remoteTotal !== null && dataIndex >= remoteTotal - 1
-                    : dataIndex >= localData.length - 1);
-                td.append(up, down);
-                cells.push(td);
+                const up = makeButton({
+                    textContent: '\u2191',
+                    title: 'Move row earlier',
+                    disabled: !canMove || dataIndex <= 0,
+                    attrs: { 'aria-label': `Move ${rowActionDescription(row)} row earlier` },
+                    data: { vgridRowReorder: 'up' },
+                });
+                const down = makeButton({
+                    textContent: '\u2193',
+                    title: 'Move row later',
+                    disabled: !canMove || dataIndex < 0 || (isRemote
+                        ? remoteTotal !== null && dataIndex >= remoteTotal - 1
+                        : dataIndex >= localData.length - 1),
+                    attrs: { 'aria-label': `Move ${rowActionDescription(row)} row later` },
+                    data: { vgridRowReorder: 'down' },
+                });
+                cells.push(make('td', { className: partClass('row-reorder') }, up, down));
             }
             if (hasRowActions) {
-                const td = document.createElement('td');
-                td.className = partClass('row-actions');
+                const td = make('td', { className: partClass('row-actions') });
                 const definitions = typeof rowActions === 'function' ? rowActions(row) : rowActions;
                 (Array.isArray(definitions) ? definitions : []).forEach(action => {
                     if (!action || typeof action !== 'object' || typeof action.onClick !== 'function') return;
                     if (action.name !== undefined && typeof action.name !== 'string') console.error('vGrid: rowActions[].name must be a string.');
                     const name = typeof action.name === 'string' && action.name.trim() ? action.name.trim() : String(action.label ?? 'action');
-                    const button = document.createElement('button');
-                    button.type = 'button';
-                    button.textContent = String(action.label ?? 'Action');
-                    button.setAttribute('aria-label', String(action.ariaLabel ?? action.label ?? 'Action'));
-                    button.disabled = action.disabled === true;
-                    button.dataset.vgridRowAction = name;
+                    const button = makeButton({
+                        textContent: String(action.label ?? 'Action'),
+                        disabled: action.disabled === true,
+                        attrs: { 'aria-label': String(action.ariaLabel ?? action.label ?? 'Action') },
+                        data: { vgridRowAction: name },
+                    });
                     rowActionHandlers.set(button, { row, action, name });
                     td.appendChild(button);
                 });
@@ -2377,7 +2052,7 @@ export function vGrid(config) {
             }
             if (hasPanels) {
                 placeToggleCells(cells, sub => {
-                    const td = document.createElement('td');
+                    const td = make('td');
                     const available = availablePanels(sub, row);
                     if (available.length) {
                         const toggle = createToggle(sub, available.length);
@@ -2441,11 +2116,6 @@ export function vGrid(config) {
         cell.focus();
     };
     if (cellSelectionActive) {
-        tbody.addEventListener('click', event => {
-            if (event.target.closest('a, button, input, select')) return;
-            const cell = ownCell(event.target);
-            if (cell) selectCell(cell);
-        }, { signal });
         tbody.addEventListener('focusin', event => {
             const cell = ownCell(event.target);
             if (!cell) return;
@@ -2453,23 +2123,6 @@ export function vGrid(config) {
                 cellSelectionAnchor = { row: Number(cell.dataset.vgridCellRow), column: Number(cell.dataset.vgridCellColumn) };
                 cellSelectionFocus = cellSelectionAnchor;
                 updateCellSelection();
-            }
-        }, { signal });
-        tbody.addEventListener('keydown', event => {
-            const cell = ownCell(event.target);
-            if (!cell || event.target.closest('input, select, textarea, [contenteditable]')) return;
-            const delta = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[event.key];
-            if (!delta) return;
-            const row = Number(cell.dataset.vgridCellRow) + delta[0];
-            const column = Number(cell.dataset.vgridCellColumn) + delta[1];
-            const next = visibleCell(row, column);
-            if (!next) return;
-            event.preventDefault();
-            selectCell(next, event.shiftKey);
-            if (event.shiftKey) {
-                const rows = Math.abs(cellSelectionFocus.row - cellSelectionAnchor.row) + 1;
-                const columns = Math.abs(cellSelectionFocus.column - cellSelectionAnchor.column) + 1;
-                announceResultCount(`Selected ${rows} row${rows === 1 ? '' : 's'} by ${columns} column${columns === 1 ? '' : 's'}.`);
             }
         }, { signal });
         element.addEventListener('copy', event => {
@@ -2486,68 +2139,93 @@ export function vGrid(config) {
         }, { signal });
     }
 
+    const moveRow = reorderButton => {
+        const tr = reorderButton.closest('tr.vgrid-row');
+        const row = tr && rowData.get(tr);
+        const direction = reorderButton.dataset.vgridRowReorder === 'up' ? -1 : 1;
+        const displayedIndex = currentRows.indexOf(row);
+        if (!row || displayedIndex < 0) return;
+        const from = isRemote ? currentOffset + displayedIndex : localData.indexOf(row);
+        const to = from + direction;
+        if (isRemote) {
+            if (typeof onRowReorder !== 'function') return;
+            onRowReorder({ row, from, to, rows: currentRows.slice() });
+            announceResultCount(`Requested row move from position ${from + 1} to ${to + 1}.`);
+            return;
+        }
+        if (!canReorderRows() || to < 0 || to >= localData.length) return;
+        localData.splice(from, 1);
+        localData.splice(to, 0, row);
+        render();
+        const movedRow = [...tbody.querySelectorAll('tr.vgrid-row')].find(candidate => rowData.get(candidate) === row);
+        const focusButton = movedRow?.querySelector(`[data-vgrid-row-reorder="${direction < 0 ? 'up' : 'down'}"]`)
+            || tbody.querySelector('[data-vgrid-row-reorder]');
+        focusButton?.focus();
+        announceResultCount(`Moved row from position ${from + 1} to ${to + 1}.`);
+    };
+
     tbody.addEventListener('click', event => {
-        const reorderButton = event.target.closest('[data-vgrid-row-reorder]');
+        const { target } = event;
+        if (hasPanels) onPanelClick(target);
+        if (cellSelectionActive && !target.closest('a, button, input, select')) {
+            const cell = ownCell(target);
+            if (cell) selectCell(cell);
+        }
+        const reorderButton = target.closest('[data-vgrid-row-reorder]');
         if (reorderButton) {
             event.preventDefault();
             event.stopPropagation();
-            const tr = reorderButton.closest('tr.vgrid-row');
-            const row = tr && rowData.get(tr);
-            const direction = reorderButton.dataset.vgridRowReorder === 'up' ? -1 : 1;
-            const displayedIndex = currentRows.indexOf(row);
-            if (!row || displayedIndex < 0) return;
-            const from = isRemote ? currentOffset + displayedIndex : localData.indexOf(row);
-            const to = from + direction;
-            if (isRemote) {
-                if (typeof onRowReorder !== 'function') return;
-                onRowReorder({ row, from, to, rows: currentRows.slice() });
-                announceResultCount(`Requested row move from position ${from + 1} to ${to + 1}.`);
-                return;
-            }
-            if (!canReorderRows() || to < 0 || to >= localData.length) return;
-            localData.splice(from, 1);
-            localData.splice(to, 0, row);
-            render();
-            const movedRow = [...tbody.querySelectorAll('tr.vgrid-row')].find(candidate => rowData.get(candidate) === row);
-            const focusButton = movedRow?.querySelector(`[data-vgrid-row-reorder="${direction < 0 ? 'up' : 'down'}"]`)
-                || tbody.querySelector('[data-vgrid-row-reorder]');
-            focusButton?.focus();
-            announceResultCount(`Moved row from position ${from + 1} to ${to + 1}.`);
+            moveRow(reorderButton);
             return;
         }
-        const actionButton = event.target.closest('[data-vgrid-row-action]');
+        const actionButton = target.closest('[data-vgrid-row-action]');
         if (actionButton) {
             const handler = rowActionHandlers.get(actionButton);
             if (handler) handler.action.onClick({ row: handler.row, event, grid: instance, name: handler.name });
             return;
         }
-        const interactive = event.target.closest('button, a, input, select, textarea');
-        if (interactive) return;
-        const tr = event.target.closest('tr.vgrid-row');
-        const row = tr && rowData.get(tr);
-        if (row) onRowClick?.({ row, event });
+        const hit = rowTargetOf(target);
+        if (hit) onRowClick?.({ row: hit.row, event });
     }, { signal });
     tbody.addEventListener('dblclick', event => {
-        if (event.target.closest('button, a, input, select, textarea')) return;
-        const tr = event.target.closest('tr.vgrid-row');
-        const row = tr && rowData.get(tr);
-        if (row) onRowDblClick?.({ row, event });
+        const hit = rowTargetOf(event.target);
+        if (hit) onRowDblClick?.({ row: hit.row, event });
     }, { signal });
     tbody.addEventListener('keydown', event => {
-        const isClick = event.key === 'Enter' || event.key === ' ';
-        const isDoubleClick = event.key === 'Enter' && event.shiftKey;
-        if (!isClick) return;
-        if (event.target.closest('button, a, input, select, textarea')) return;
-        const tr = event.target.closest('tr.vgrid-row');
-        if (!tr || (!cellSelectionActive && event.target !== tr) || (cellSelectionActive && !event.target.closest('[data-vgrid-cell-row]'))) return;
-        const row = rowData.get(tr);
-        if (!row) return;
-        if (isDoubleClick && onRowDblClick) {
+        const { key, target } = event;
+        if (hasPanels && (key === 'Enter' || key === ' ')) {
+            const toggle = target.closest('[data-vgrid-toggle]');
+            if (toggle && toggle.tagName !== 'BUTTON' && rowOf(toggle)) {
+                event.preventDefault();
+                toggle.click();
+            }
+        }
+        if (cellSelectionActive) {
+            const cell = ownCell(target);
+            const delta = cell && !target.closest('input, select, textarea, [contenteditable]')
+                ? { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[key]
+                : null;
+            const next = delta && visibleCell(Number(cell.dataset.vgridCellRow) + delta[0], Number(cell.dataset.vgridCellColumn) + delta[1]);
+            if (next) {
+                event.preventDefault();
+                selectCell(next, event.shiftKey);
+                if (event.shiftKey) {
+                    const rows = Math.abs(cellSelectionFocus.row - cellSelectionAnchor.row) + 1;
+                    const columns = Math.abs(cellSelectionFocus.column - cellSelectionAnchor.column) + 1;
+                    announceResultCount(`Selected ${rows} row${rows === 1 ? '' : 's'} by ${columns} column${columns === 1 ? '' : 's'}.`);
+                }
+                return;
+            }
+        }
+        if (key !== 'Enter' && key !== ' ') return;
+        const hit = rowTargetOf(target);
+        if (!hit || (!cellSelectionActive && target !== hit.tr) || (cellSelectionActive && !target.closest('[data-vgrid-cell-row]'))) return;
+        if (key === 'Enter' && event.shiftKey && onRowDblClick) {
             event.preventDefault();
-            onRowDblClick({ row, event });
-        } else if (isClick && onRowClick) {
+            onRowDblClick({ row: hit.row, event });
+        } else if (onRowClick) {
             event.preventDefault();
-            onRowClick({ row, event });
+            onRowClick({ row: hit.row, event });
         }
     }, { signal });
 
@@ -2650,25 +2328,13 @@ export function vGrid(config) {
         notifySelection();
     };
 
-    const selectionOfferRow = rowSelectionActive && !singleSelection ? document.createElement('tr') : null;
-    const selectionOfferCell = selectionOfferRow ? document.createElement('td') : null;
+    const selectionOfferRow = rowSelectionActive && !singleSelection ? spanningRow('selection') : null;
+    const selectionOfferCell = selectionOfferRow?.firstChild ?? null;
     if (selectionOfferRow) {
-        selectionOfferRow.className = partClass('selection');
-        selectionOfferRow.setAttribute('role', 'presentation');
         selectionOfferRow.hidden = true;
-        selectionOfferCell.colSpan = totalCols;
-        selectionOfferRow.appendChild(selectionOfferCell);
-        trackColSpan(selectionOfferCell);
         thead.appendChild(selectionOfferRow);
     }
-    const selectionOfferButton = (label, action, part) => {
-        const button = document.createElement('button');
-        button.type = 'button';
-        button.className = partClass(part);
-        button.textContent = label;
-        button.dataset.vgridSelectionAction = action;
-        return button;
-    };
+    const selectionOfferButton = (label, action, part) => makeButton({ className: partClass(part), textContent: label, data: { vgridSelectionAction: action } });
     const selectionOfferText = () => {
         const total = selectionTotal();
         if (selection.all) {
@@ -2691,12 +2357,7 @@ export function vGrid(config) {
             return;
         }
         const focused = selectionOfferCell.contains(document.activeElement) ? document.activeElement.dataset.vgridSelectionAction : null;
-        const bar = document.createElement('div');
-        bar.className = partClass('selection-bar');
-        const text = document.createElement('span');
-        text.className = partClass('selection-text');
-        text.textContent = selectionOfferText();
-        bar.appendChild(text);
+        const bar = make('div', { className: partClass('selection-bar') }, make('span', { className: partClass('selection-text'), textContent: selectionOfferText() }));
         const total = selectionTotal();
         if (selection.all) bar.appendChild(selectionOfferButton('Clear selection', 'clear', 'selection-action'));
         else if (total === null || pageSelectableRows().length < total) {
@@ -2774,20 +2435,19 @@ export function vGrid(config) {
     }
 
     const loadingSpacer = () => {
-        const tr = document.createElement('tr');
+        const tr = spanningRow('loading-space');
         tr.dataset.vgridLoadingSpace = '1';
-        tr.className = partClass('loading-space');
-        tr.setAttribute('role', 'presentation');
-        const td = document.createElement('td');
-        td.colSpan = totalCols;
-        tr.appendChild(td);
-        trackColSpan(td);
         return tr;
     };
 
     const dropLoadingSpacer = () => {
         Array.from(tbody.querySelectorAll('[data-vgrid-loading-space]')).forEach(tr => tr.remove());
     };
+
+    const dimRows = dimmed => Array.from(tbody.rows).forEach(row => {
+        if (dimmed && !row.dataset.vgridLoadingSpace) row.dataset.vgridDimmed = '1';
+        else delete row.dataset.vgridDimmed;
+    });
 
     const placeLoadingIndicator = () => {
         loadingIndicator.style.top = `${tbody.offsetTop}px`;
@@ -2798,11 +2458,7 @@ export function vGrid(config) {
     const showLoading = () => {
         if (!tbody.rows.length) tbody.appendChild(loadingSpacer());
         placeLoadingIndicator();
-        Array.from(tbody.rows).forEach(row => {
-            if (row.dataset.vgridLoadingSpace) return;
-            row.style.filter = 'blur(1px)';
-            row.style.opacity = '.55';
-        });
+        dimRows(true);
         clearTimeout(loadingShowTimer);
         loadingShowTimer = setTimeout(() => {
             loadingBadge.classList.remove('vgrid-loading-error');
@@ -2810,7 +2466,6 @@ export function vGrid(config) {
             loadingText.textContent = 'Loading…';
             loadingIndicator.setAttribute('aria-live', 'polite');
             loadingIndicator.hidden = false;
-            loadingIndicator.style.display = 'flex';
             placeLoadingIndicator();
         }, 200);
     };
@@ -2818,43 +2473,20 @@ export function vGrid(config) {
     const hideLoading = () => {
         clearTimeout(loadingShowTimer);
         dropLoadingSpacer();
-        Array.from(tbody.rows).forEach(row => {
-            row.style.filter = '';
-            row.style.opacity = '';
-        });
+        dimRows(false);
         loadingIndicator.hidden = true;
-        loadingIndicator.style.display = 'none';
     };
 
     if (rowsPerPage && (showPagination || showRowsPerPage)) tfoot.appendChild(makeBar());
 
-    if (bottomActions) {
-        const tr = document.createElement('tr');
-        tr.className = partClass('actions-row');
-        tr.setAttribute('role', 'presentation');
-        const td = document.createElement('td');
-        td.colSpan = totalCols;
-        const inner = document.createElement('div');
-        inner.className = partClass('viewport');
-        inner.appendChild(makeActions());
-        td.appendChild(inner);
-        tr.appendChild(td);
-        trackColSpan(td);
-        tfoot.appendChild(tr);
-    }
+    if (bottomActions) tfoot.appendChild(spanningRow('actions-row', make('div', { className: partClass('viewport') }, makeActions())));
 
     element.innerHTML = '';
-    element.appendChild(colgroup);
-    element.appendChild(thead);
-    element.appendChild(tbody);
+    element.append(colgroup, thead, tbody);
     if ((rowsPerPage && (showPagination || showRowsPerPage)) || bottomActions) element.appendChild(tfoot);
-    const gridWrapper = document.createElement('div');
-    gridWrapper.className = 'vgrid-wrapper';
-    gridWrapper.dataset.vgridBorders = borderPreset;
-    gridWrapper.dataset.vgridSize = currentSize;
+    const gridWrapper = make('div', { className: 'vgrid-wrapper', data: { vgridBorders: borderPreset, vgridSize: currentSize } });
     if (striped !== false) gridWrapper.dataset.vgridStriped = '1';
     if (hover !== false) gridWrapper.dataset.vgridHover = '1';
-    gridWrapper.style.cssText = 'display:block;position:relative;width:100%;overflow-x:auto;overflow-y:hidden;';
     gridWrapper.style.setProperty('--vgrid-easing', `${easingMs}ms`);
     element.replaceWith(gridWrapper);
     gridWrapper.appendChild(element);
@@ -2862,25 +2494,12 @@ export function vGrid(config) {
     gridWrapper.appendChild(settingsPanel);
     subgrids.forEach(sub => gridWrapper.appendChild(sub.menu));
     if (filterRowElement) gridWrapper.appendChild(filterModeMenu.menu);
-    const resultStatus = document.createElement('span');
-    resultStatus.setAttribute('role', 'status');
-    resultStatus.setAttribute('aria-atomic', 'true');
-    resultStatus.style.cssText = 'position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;';
-    gridWrapper.appendChild(resultStatus);
-    loadingIndicator = document.createElement('output');
-    loadingIndicator.setAttribute('aria-live', 'polite');
-    loadingIndicator.hidden = true;
-    loadingIndicator.style.cssText = 'position:absolute;left:0;width:100%;display:none;align-items:center;justify-content:center;padding:0 .5em;box-sizing:border-box;pointer-events:none;';
-    loadingBadge = document.createElement('span');
-    loadingBadge.className = 'vgrid-loading-badge';
-    loadingSpinner = document.createElement('span');
-    loadingSpinner.className = 'vgrid-spinner';
-    loadingSpinner.setAttribute('aria-hidden', 'true');
-    loadingText = document.createElement('span');
-    loadingText.className = 'vgrid-loading-text';
-    loadingBadge.append(loadingSpinner, loadingText);
-    loadingIndicator.appendChild(loadingBadge);
-    gridWrapper.appendChild(loadingIndicator);
+    const resultStatus = make('span', { className: 'vgrid-visually-hidden', attrs: { role: 'status', 'aria-atomic': 'true' } });
+    loadingSpinner = make('span', { className: 'vgrid-spinner', attrs: { 'aria-hidden': 'true' } });
+    loadingText = make('span', { className: 'vgrid-loading-text' });
+    loadingBadge = make('span', { className: 'vgrid-loading-badge' }, loadingSpinner, loadingText);
+    loadingIndicator = make('output', { className: 'vgrid-loading', hidden: true, attrs: { 'aria-live': 'polite' } }, loadingBadge);
+    gridWrapper.append(resultStatus, loadingIndicator);
 
     if (autoDestroy === true) {
         const destroyWhenDetached = () => { if (!gridWrapper.isConnected) instance.destroy(); };
@@ -2905,7 +2524,17 @@ export function vGrid(config) {
     let displayedWidths = null;
     let widthGrowth = 0;
     const setViewportWidth = () => {
-        if (gridWrapper.clientWidth) gridWrapper.style.setProperty('--vgrid-viewport', `${gridWrapper.clientWidth}px`);
+        const client = gridWrapper.clientWidth;
+        if (!client) return;
+        const contentLeft = gridWrapper.getBoundingClientRect().left + gridWrapper.clientLeft;
+        const screen = document.documentElement.clientWidth || window.innerWidth;
+        const start = Math.max(0, Math.min(client, -contentLeft));
+        const end = screen ? Math.min(client, screen - contentLeft) : client;
+        if (end <= start) return;
+        const width = `${Math.floor(end - start)}px`;
+        const offset = `${Math.floor(start)}px`;
+        if (gridWrapper.style.getPropertyValue('--vgrid-viewport') !== width) gridWrapper.style.setProperty('--vgrid-viewport', width);
+        if (gridWrapper.style.getPropertyValue('--vgrid-viewport-offset') !== offset) gridWrapper.style.setProperty('--vgrid-viewport-offset', offset);
     };
     const updateScrollRegion = () => {
         setViewportWidth();
@@ -2979,7 +2608,20 @@ export function vGrid(config) {
     });
     columnObserver.observe(element);
     columnObserver.observe(gridWrapper);
-    gridWrapper.addEventListener('scroll', () => { if (loadingIndicator.style.display !== 'none') placeLoadingIndicator(); }, { signal, passive: true });
+    let screenFrame = 0;
+    const screenObserver = new ResizeObserver(() => {
+        if (screenFrame) return;
+        screenFrame = requestAnimationFrame(() => {
+            screenFrame = 0;
+            if (!destroyed) setViewportWidth();
+        });
+    });
+    screenObserver.observe(document.documentElement);
+    window.addEventListener('resize', setViewportWidth, { signal });
+    window.addEventListener('scroll', event => {
+        if (event.target !== gridWrapper && !gridWrapper.contains(event.target)) setViewportWidth();
+    }, { signal, capture: true, passive: true });
+    gridWrapper.addEventListener('scroll', () => { if (!loadingIndicator.hidden) placeLoadingIndicator(); }, { signal, passive: true });
     let cursorHost = null;
     let suppressHeaderClick = false;
     let destroyed = false;
@@ -3029,16 +2671,12 @@ export function vGrid(config) {
 
     const showGridError = message => {
         clearTimeout(loadingShowTimer);
-        Array.from(tbody.rows).forEach(row => {
-            row.style.filter = '';
-            row.style.opacity = '';
-        });
+        dimRows(false);
         loadingBadge.classList.add('vgrid-loading-error');
         loadingSpinner.hidden = true;
         loadingText.textContent = `${message}.`;
         loadingIndicator.setAttribute('aria-live', 'assertive');
         loadingIndicator.hidden = false;
-        loadingIndicator.style.display = 'flex';
         placeLoadingIndicator();
     };
 
@@ -3131,26 +2769,15 @@ export function vGrid(config) {
         const keepFocus = focused ? (focused.getAttribute('aria-label') || `page ${focused.dataset.vgridPage}`) : null;
         pagerEl.innerHTML = '';
         const btn = (label, page, disabled, active, ariaLabel) => {
-            const b = document.createElement('button');
-            b.type = 'button';
-            b.textContent = label;
+            const b = makeButton({ textContent: label, disabled, data: { vgridPage: String(page) } });
             if (active) b.setAttribute('aria-current', 'page');
             if (ariaLabel) b.setAttribute('aria-label', ariaLabel);
-            b.disabled = disabled;
-            b.dataset.vgridPage = String(page);
             return b;
         };
         pagerEl.appendChild(btn('«', 1, currentPage === 1, false, 'First page'));
         pagerEl.appendChild(btn('‹', currentPage - 1, currentPage === 1, false, 'Previous page'));
         pageRange(currentPage, totalPages, size).forEach(p => {
-            if (p === '…') {
-                const span = document.createElement('span');
-                span.className = partClass('pager-ellipsis');
-                span.textContent = '…';
-                pagerEl.appendChild(span);
-            } else {
-                pagerEl.appendChild(btn(p, p, false, p === currentPage));
-            }
+            pagerEl.appendChild(p === '…' ? make('span', { className: partClass('pager-ellipsis'), textContent: '…' }) : btn(p, p, false, p === currentPage));
         });
         pagerEl.appendChild(btn('›', currentPage + 1, currentPage === totalPages, false, 'Next page'));
         pagerEl.appendChild(btn('»', totalPages, currentPage === totalPages, false, 'Last page'));
@@ -3252,10 +2879,7 @@ export function vGrid(config) {
 
     const saveBlob = (blob, name) => {
         const href = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = href;
-        link.download = name;
-        link.style.display = 'none';
+        const link = make('a', { href, download: name, hidden: true });
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -3389,10 +3013,7 @@ export function vGrid(config) {
     };
 
     const startPrint = () => {
-        const frame = document.createElement('iframe');
-        frame.setAttribute('aria-hidden', 'true');
-        frame.setAttribute('tabindex', '-1');
-        frame.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden;';
+        const frame = make('iframe', { className: 'vgrid-print-frame', attrs: { 'aria-hidden': 'true', tabindex: '-1' } });
         document.body.appendChild(frame);
 
         const view = frame.contentWindow;
@@ -3700,15 +3321,10 @@ export function vGrid(config) {
         const align = style.textAlign;
         state.width = rect.width;
         state.grab = state.x - rect.left;
-        const ghost = document.createElement('div');
-        ghost.className = partClass('column-ghost');
-        ghost.textContent = th.textContent;
-        ghost.setAttribute('aria-hidden', 'true');
-        ghost.style.cssText = `position:absolute;z-index:5;top:${rect.top - wrap.top}px;left:${rect.left - wrap.left}px;width:${rect.width}px;height:${rect.height}px;box-sizing:border-box;padding:${style.padding};display:flex;align-items:center;justify-content:${align === 'center' || align.endsWith('center') ? 'center' : align === 'right' || align === 'end' ? 'flex-end' : 'flex-start'};overflow:hidden;white-space:nowrap;pointer-events:none;`;
-        const marker = document.createElement('div');
-        marker.className = partClass('column-marker');
-        marker.setAttribute('aria-hidden', 'true');
-        marker.style.cssText = `position:absolute;z-index:4;top:${rect.top - wrap.top}px;height:${table.bottom - rect.top}px;width:3px;opacity:0;pointer-events:none;`;
+        const ghost = make('div', { className: partClass('column-ghost'), textContent: th.textContent, attrs: { 'aria-hidden': 'true' } });
+        ghost.style.cssText = `top:${rect.top - wrap.top}px;left:${rect.left - wrap.left}px;width:${rect.width}px;height:${rect.height}px;padding:${style.padding};justify-content:${align === 'center' || align.endsWith('center') ? 'center' : align === 'right' || align === 'end' ? 'flex-end' : 'flex-start'};`;
+        const marker = make('div', { className: partClass('column-marker'), attrs: { 'aria-hidden': 'true' } });
+        marker.style.cssText = `top:${rect.top - wrap.top}px;height:${table.bottom - rect.top}px;`;
         gridWrapper.append(marker, ghost);
         state.ghost = ghost;
         state.marker = marker;
@@ -3926,6 +3542,8 @@ export function vGrid(config) {
             barObserver.disconnect();
             paginationBars.forEach(entry => cancelAnimationFrame(entry.frame));
             columnObserver.disconnect();
+            screenObserver.disconnect();
+            cancelAnimationFrame(screenFrame);
             cancelAnimationFrame(columnFrame);
             paginationBars.length = 0;
             loadingIndicator.remove();
@@ -3955,10 +3573,9 @@ export function vGrid(config) {
             else {
                 gridWrapper.replaceWith(element);
                 element.innerHTML = '';
-                element.style.width = '';
-                element.style.maxWidth = '';
-                element.style.borderCollapse = '';
+                element.classList.remove('vgrid');
                 element.style.tableLayout = '';
+                element.style.minWidth = '';
                 element.style.userSelect = '';
             }
         }

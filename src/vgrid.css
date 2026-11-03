@@ -58,7 +58,7 @@
 .vgrid-pagination-bar,
 .vgrid-subgrid-slide {
     position: sticky;
-    left: 0;
+    left: var(--vgrid-viewport-offset, 0px);
     box-sizing: border-box;
     max-width: 100%;
 }
@@ -92,7 +92,6 @@ span.vgrid-viewport {
     max-height: var(--vgrid-subgrid-max-height, 400px);
     padding: .5em;
     overflow: auto;
-    overscroll-behavior: contain;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -178,6 +177,11 @@ span.vgrid-viewport {
 }
 
 .vgrid-wrapper {
+    display: block;
+    position: relative;
+    width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
     font-size: var(--vgrid-font-size, inherit);
     border: var(--vgrid-border-width, 1px) solid var(--vgrid-border-color, #dee2e6);
     border-radius: var(--vgrid-border-radius, .25rem);
@@ -191,6 +195,7 @@ span.vgrid-viewport {
 }
 
 .vgrid-actions {
+    float: right;
     display: inline-flex;
     flex-wrap: wrap;
     justify-content: flex-end;
@@ -307,6 +312,7 @@ span.vgrid-viewport {
 .vgrid-toggle-subgrid {
     font-weight: 700;
     line-height: 1;
+    cursor: pointer;
 }
 
 button.vgrid-toggle-subgrid {
@@ -531,7 +537,6 @@ button.vgrid-toggle-subgrid {
 .vgrid-filter-mode-item,
 .vgrid-panel-menu-item,
 .vgrid-settings-close,
-.vgrid-settings-column button,
 .vgrid-settings-actions button,
 .vgrid-toggle-subgrid,
 .vgrid-subgrid-close,
@@ -544,8 +549,15 @@ button.vgrid-toggle-subgrid {
     box-sizing: border-box;
 }
 
-.vgrid-settings-column button {
-    padding: 0 .3em;
+.vgrid-settings-column {
+    margin: .15em 0;
+}
+
+.vgrid-settings-column label {
+    display: flex;
+    align-items: center;
+    min-width: 0;
+    margin: 0;
 }
 
 .vgrid-settings-actions {
@@ -677,7 +689,157 @@ button.vgrid-toggle-subgrid {
 }
 
 .vgrid {
+    width: 100%;
+    max-width: 100%;
     border: 0;
+    border-collapse: collapse;
+}
+
+.vgrid-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+.vgrid-clip {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+col.vgrid-toggle-column,
+col.vgrid-select-column,
+col.vgrid-row-number-column {
+    width: 1px;
+}
+
+.vgrid-header th button {
+    display: block;
+    width: 100%;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
+    text-align: inherit;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    cursor: pointer;
+}
+
+.vgrid-filter input,
+.vgrid-filter select {
+    width: 100%;
+}
+
+.vgrid-filter-wrap {
+    position: relative;
+    display: block;
+}
+
+.vgrid-filter-clear {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 0;
+    width: 24px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    line-height: 1;
+    color: inherit;
+    opacity: .6;
+    cursor: pointer;
+}
+
+.vgrid-filter-clear:hover {
+    opacity: 1;
+}
+
+.vgrid-filter-wrap > select + .vgrid-filter-clear {
+    right: 1.2em;
+}
+
+.vgrid-filter-moded {
+    position: relative;
+    display: flex;
+    gap: .2em;
+}
+
+.vgrid-filter-mode {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 1;
+    width: 24px;
+    padding: 0;
+    border: 0;
+    background: none;
+    font: inherit;
+    line-height: 1;
+    color: inherit;
+    cursor: pointer;
+    overflow: hidden;
+}
+
+.vgrid-filter-moded > input,
+.vgrid-filter-moded > .vgrid-filter-wrap {
+    flex: 1 1 0;
+    min-width: 0;
+}
+
+.vgrid-filter-moded input[data-slot="0"],
+.vgrid-filter-fixed {
+    padding-left: 24px;
+}
+
+.vgrid-filter-fixed {
+    cursor: pointer;
+}
+
+.vgrid-filter-mode-symbol {
+    display: inline-block;
+    min-width: 1.5em;
+}
+
+.vgrid-loading {
+    position: absolute;
+    left: 0;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 .5em;
+    box-sizing: border-box;
+    pointer-events: none;
+}
+
+.vgrid-loading[hidden] {
+    display: none;
+}
+
+.vgrid > tbody > tr[data-vgrid-dimmed] {
+    filter: blur(1px);
+    opacity: .55;
+}
+
+.vgrid-print-frame {
+    position: fixed;
+    right: 0;
+    bottom: 0;
+    width: 0;
+    height: 0;
+    border: 0;
+    visibility: hidden;
 }
 
 .vgrid th,
@@ -699,6 +861,14 @@ button.vgrid-toggle-subgrid {
 }
 
 .vgrid-column-ghost {
+    position: absolute;
+    z-index: 5;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    overflow: hidden;
+    white-space: nowrap;
+    pointer-events: none;
     background-color: Canvas;
     color: inherit;
     font-weight: 700;
@@ -721,6 +891,11 @@ button.vgrid-toggle-subgrid {
 }
 
 .vgrid-column-marker {
+    position: absolute;
+    z-index: 4;
+    width: 3px;
+    opacity: 0;
+    pointer-events: none;
     background-color: AccentColor;
     border-radius: 3px;
     box-shadow: 0 0 .6em AccentColor;
