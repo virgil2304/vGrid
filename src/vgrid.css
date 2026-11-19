@@ -29,9 +29,14 @@
     background: none;
 }
 
+.vgrid-loading-badge.vgrid-loading-error,
+.vgrid-panel-error {
+    color: #8a1f11;
+    color: light-dark(#8a1f11, #ffb4a8);
+}
+
 .vgrid-loading-badge.vgrid-loading-error {
-    color: #b3261e;
-    border-color: rgba(179, 38, 30, .45);
+    border-color: color-mix(in srgb, currentColor 45%, transparent);
 }
 
 .vgrid-spinner {
@@ -65,7 +70,7 @@
 
 .vgrid-viewport,
 .vgrid-pagination-bar {
-    width: calc(var(--vgrid-viewport, 100%) - .2em);
+    width: calc(var(--vgrid-viewport, 100%) - 2 * var(--vgrid-cell-padding-x, .4em));
 }
 
 span.vgrid-viewport {
@@ -154,12 +159,8 @@ span.vgrid-viewport {
     color: color-mix(in srgb, currentColor 60%, transparent);
 }
 
-.vgrid-panel-error {
-    color: #8a1f11;
-}
-
 .vgrid-empty td {
-    padding: .75em .4em;
+    padding: .75em var(--vgrid-cell-padding-x, .4em);
     color: color-mix(in srgb, currentColor 60%, transparent);
     text-align: center;
 }
@@ -168,12 +169,6 @@ span.vgrid-viewport {
     margin: 0;
     white-space: pre-wrap;
     font-size: inherit;
-}
-
-@media (prefers-color-scheme: dark) {
-    .vgrid-panel-error {
-        color: #ffb4a8;
-    }
 }
 
 .vgrid-wrapper {
@@ -251,8 +246,10 @@ span.vgrid-viewport {
 .vgrid-header th,
 .vgrid-filter td,
 .vgrid-pagination td,
+.vgrid-selection td,
+.vgrid-actions-row td,
 .vgrid-row td {
-    padding: .1em .1em;
+    padding: var(--vgrid-cell-padding-y, .25em) var(--vgrid-cell-padding-x, .4em);
 }
 
 .vgrid-pagination td {
@@ -277,9 +274,23 @@ span.vgrid-viewport {
     vertical-align: middle;
 }
 
+.vgrid-select input:focus-visible {
+    outline: 2px solid AccentColor;
+    outline-offset: 0;
+}
+
 .vgrid-selection td {
-    padding: .25rem .5rem;
     background: color-mix(in srgb, currentColor 9%, Canvas);
+}
+
+.vgrid-row-actions,
+.vgrid-row-reorder {
+    white-space: nowrap;
+}
+
+.vgrid-row-actions button + button,
+.vgrid-row-reorder button + button {
+    margin-inline-start: .25em;
 }
 
 .vgrid-selection-bar {
@@ -330,9 +341,12 @@ button.vgrid-toggle-subgrid {
     font-size: 1.35em;
 }
 
-.vgrid-toggle-subgrid:focus-visible {
+.vgrid-toggle-subgrid:focus-visible,
+.vgrid-header th button:focus-visible,
+.vgrid-filter input:focus-visible,
+.vgrid-filter select:focus-visible {
     outline: 2px solid AccentColor;
-    outline-offset: 1px;
+    outline-offset: -2px;
 }
 
 .vgrid [role="gridcell"][data-vgrid-cell-row]:focus-visible {
@@ -556,6 +570,7 @@ button.vgrid-toggle-subgrid {
 .vgrid-settings-column label {
     display: flex;
     align-items: center;
+    gap: .4em;
     min-width: 0;
     margin: 0;
 }
@@ -610,7 +625,7 @@ button.vgrid-toggle-subgrid {
     display: inline-flex;
     align-items: center;
     gap: .15em;
-    height: 1lh;
+    min-height: 1lh;
 }
 
 .vgrid-pagination-bar[data-vgrid-stacked] {
@@ -631,7 +646,6 @@ button.vgrid-toggle-subgrid {
     flex: 1 1 100%;
     flex-wrap: wrap;
     justify-content: center;
-    height: auto;
 }
 
 .vgrid-pager button {
@@ -703,6 +717,7 @@ button.vgrid-toggle-subgrid {
     margin: -1px;
     overflow: hidden;
     clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
     white-space: nowrap;
     border: 0;
 }
@@ -1016,4 +1031,8 @@ col.vgrid-row-number-column {
 
 .vgrid-wrapper[data-vgrid-hover] > .vgrid > tbody > tr.vgrid-row:hover > td {
     background-color: var(--vgrid-hover-color, rgba(128, 128, 128, .18));
+}
+
+.vgrid-wrapper > .vgrid > tbody > tr.vgrid-row.vgrid-row-selected > td {
+    background-color: var(--vgrid-selected-color, color-mix(in srgb, Highlight 18%, transparent));
 }

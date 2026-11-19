@@ -1956,6 +1956,7 @@ function vGrid(config) {
         }
         renderFailures.clear();
         let rowClassFailed = false;
+        let rowActionsFailed = false;
         rows.forEach((row, index) => {
             const tr = make('tr', { className: partClass('row', row.id !== undefined && namePrefix ? `${namePrefix}-row-${row.id}` : '') });
             if (cellSelectionActive) tr.setAttribute('role', 'row');
@@ -2034,7 +2035,13 @@ function vGrid(config) {
             }
             if (hasRowActions) {
                 const td = make('td', { className: partClass('row-actions') });
-                const definitions = typeof rowActions === 'function' ? rowActions(row) : rowActions;
+                let definitions = null;
+                try {
+                    definitions = typeof rowActions === 'function' ? rowActions(row) : rowActions;
+                } catch (error) {
+                    if (!rowActionsFailed) console.error(`vGrid: rowActions failed: ${error?.message || error}`);
+                    rowActionsFailed = true;
+                }
                 (Array.isArray(definitions) ? definitions : []).forEach(action => {
                     if (!action || typeof action !== 'object' || typeof action.onClick !== 'function') return;
                     if (action.name !== undefined && typeof action.name !== 'string') console.error('vGrid: rowActions[].name must be a string.');
@@ -2687,7 +2694,7 @@ function vGrid(config) {
         }, delay);
     };
 
-    const fetchData = () => {
+    const fetchData = (clamped = false) => {
         if (fetchAbort) fetchAbort.abort();
         fetchAbort = new AbortController();
 
@@ -2718,6 +2725,12 @@ function vGrid(config) {
                 const responsePage = toCount(pg);
                 const pageNo = Number.isInteger(responsePage) && responsePage > 0 ? responsePage : currentPage;
                 currentPage = pageNo;
+                const lastPage = totalIsKnown && rowPageSize ? Math.ceil(reportedTotal / rowPageSize) : 0;
+                if (!clamped && !rows.length && lastPage && pageNo > lastPage) {
+                    currentPage = lastPage;
+                    fetchData(true);
+                    return;
+                }
                 const rowOffset = rowPageSize ? (pageNo - 1) * rowPageSize : pageNo === 1 ? 0 : null;
                 const rowCount = totalIsKnown ? reportedTotal : -1;
                 const partial = totalIsKnown
@@ -2825,10 +2838,12 @@ function vGrid(config) {
     const sortRows = rows => {
         const sorts = sortCriteria.map(sort => ({ ...sort, col: activeColumns.find(column => column.name === sort.column) })).filter(sort => sort.col);
         if (!sorts.length) return rows;
+        const keys = new Map(rows.map(row => [row, sorts.map(sort => cellText(row, sort.col))]));
         return rows.sort((a, b) => {
-            for (const sort of sorts) {
-                const result = compare(cellText(a, sort.col), cellText(b, sort.col));
-                if (result) return sort.order === 'asc' ? result : -result;
+            const keysA = keys.get(a), keysB = keys.get(b);
+            for (let i = 0; i < sorts.length; i++) {
+                const result = compare(keysA[i], keysB[i]);
+                if (result) return sorts[i].order === 'asc' ? result : -result;
             }
             return 0;
         });
@@ -3044,10 +3059,11 @@ function vGrid(config) {
         }
     };
 
+    const collator = new Intl.Collator(gridLocale || undefined, { numeric: true, sensitivity: 'base' });
     const compare = (a, b) => {
         const numA = parseFloat(a), numB = parseFloat(b);
-        if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
-        return a.localeCompare(b);
+        if (!isNaN(numA) && !isNaN(numB) && numA !== numB) return numA - numB;
+        return collator.compare(a, b);
     };
 
     const updateSortIndicators = () => {
@@ -3504,6 +3520,7 @@ function vGrid(config) {
         destroy() {
             if (destroyed) return;
             destroyed = true;
+            endReorder(false);
             controller.abort();
             if (resizeState) {
                 resizeState = null;
@@ -3569,6 +3586,8 @@ function vGrid(config) {
             clearFiltersButton?.remove();
             downloadButton?.remove();
             printButton?.remove();
+            textSizeButtons.forEach(button => button.remove());
+            externalPaginationElements.forEach(container => container.replaceChildren());
             if (createdTable) gridWrapper.remove();
             else {
                 gridWrapper.replaceWith(element);
